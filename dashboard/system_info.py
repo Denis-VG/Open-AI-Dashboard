@@ -18,7 +18,7 @@ try:
 except ImportError:
     psutil = None
 
-# ── helpers ──────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────
 
 def _disk_info_windows() -> list[dict]:
     disks = []
@@ -26,6 +26,7 @@ def _disk_info_windows() -> list[dict]:
         output = subprocess.check_output(
             ['wmic', 'logicaldisk', 'get', 'caption,size,freespace'],
             encoding='cp866',
+            errors='replace',
             stderr=subprocess.DEVNULL
         )
         for line in output.strip().split('\n')[1:]:
@@ -51,7 +52,8 @@ def _disk_info_unix() -> list[dict]:
     try:
         output = subprocess.check_output(
             ['df', '-B1', '--output=target,size,avail'],
-            encoding='utf-8'
+            encoding='utf-8',
+            errors='replace',
         )
         for line in output.strip().split('\n')[1:]:
             parts = line.split()
@@ -74,7 +76,11 @@ def _disk_free(root: str) -> Optional[int]:
     if IS_WIN:
         return None
     try:
-        out = subprocess.check_output(['df', '-k', root], encoding='utf-8')
+        out = subprocess.check_output(
+            ['df', '-k', root],
+            encoding='utf-8',
+            errors='replace',
+        )
         parts = out.strip().split('\n')[-1].split()
         if len(parts) >= 4:
             return int(parts[3]) * 1024
@@ -156,7 +162,7 @@ def _cpu_load() -> Optional[float]:
     return None
 
 
-# ── public API ───────────────────────────────────────────────────────
+# ── public API ────────────────────────────────────────────────────
 
 def get_system_info() -> dict:
     info = {
@@ -193,7 +199,7 @@ def get_system_info() -> dict:
     return info
 
 
-# ── session logs ─────────────────────────────────────────────────────
+# ── session logs ──────────────────────────────────────────────────
 
 def get_session_logs(limit: int = 50) -> list[dict]:
     logs_dir = os.path.join(DATA_DIR, 'app_data')

@@ -138,7 +138,7 @@ TOOL_DEFS: list[dict] = [
 WRITE_TOOLS = {'write_file', 'append_file', 'write_file_chunk', 'execute_command'}
 
 
-# ── ToolRegistry ─────────────────────────────────────────────────
+# ── ToolRegistry ──────────────────────────────────────────────────
 
 class ToolRegistry:
     """Holds tool definitions and executes tool calls with path safety."""
@@ -147,7 +147,7 @@ class ToolRegistry:
         self._work_dir = work_dir
         self._write_tools = WRITE_TOOLS
 
-    # ── path resolution ──────────────────────────────────────────
+    # ── path resolution ───────────────────────────────────────────
 
     def resolve_path(self, rel_path: str) -> str:
         """Convert a tool-supplied relative path to a safe absolute path."""
@@ -155,7 +155,7 @@ class ToolRegistry:
             return os.path.realpath(os.path.normpath(rel_path))
         return os.path.realpath(os.path.normpath(os.path.join(self._work_dir, rel_path)))
 
-    # ── definitions ───────────────────────────────────────────────
+    # ── definitions ────────────────────────────────────────────────
 
     @property
     def definitions(self) -> list[dict]:
@@ -198,19 +198,19 @@ class ToolRegistry:
             }
         ]
 
-    # ── helpers ───────────────────────────────────────────────────
+    # ── helpers ────────────────────────────────────────────────────
 
     def is_write_tool(self, name: str) -> bool:
         return name in self._write_tools
 
-    # ── execution ─────────────────────────────────────────────────
+    # ── execution ──────────────────────────────────────────────────
 
     async def execute(self, name: str, args: dict) -> dict:
         """Run a tool in a thread-pool and return its result dict."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._execute_sync, name, args)
 
-    # ── sync core ─────────────────────────────────────────────────
+    # ── sync core ──────────────────────────────────────────────────
 
     def _execute_sync(self, name: str, args: dict) -> dict:
         try:
@@ -232,7 +232,7 @@ class ToolRegistry:
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
 
-    # ── individual tools ──────────────────────────────────────────
+    # ── individual tools ───────────────────────────────────────────
 
     def _tool_write_file(self, args: dict) -> dict:
         full = self.resolve_path(args['path'])
@@ -317,6 +317,9 @@ class ToolRegistry:
 
     def _tool_execute_command(self, args: dict) -> dict:
         try:
+            # Use errors='replace' to avoid UnicodeDecodeError when
+            # command output contains non-UTF-8 bytes (e.g. cp1251 on
+            # Russian Windows, or binary data in stdout).
             result = subprocess.run(
                 args['command'],
                 shell=True,
@@ -324,7 +327,8 @@ class ToolRegistry:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                encoding='utf-8'
+                encoding='utf-8',
+                errors='replace',
             )
             output = result.stdout or result.stderr
             if len(output) > 5000:
@@ -348,7 +352,17 @@ class ToolRegistry:
                 cmd = f'findstr /S /N /I /C:"{pattern}" "{search_path}\\*"'
             else:
                 cmd = f'grep -rnI "{pattern}" "{search_path}" --include="*" | head -30'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+            # Use errors='replace' to tolerate non-UTF-8 bytes in file
+            # contents / paths returned by findstr / grep.
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                encoding='utf-8',
+                errors='replace',
+            )
             if result.returncode == 1:
                 return {'success': True, 'matches': '', 'message': 'No matches found'}
             if result.returncode != 0:
