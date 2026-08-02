@@ -562,8 +562,9 @@ select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%
 
         <!-- Storage -->
         <div class="card"><h2>Storage</h2><p class="subtitle">Drive usage</p>
-          <div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:3px"><span id="diskUsed">—</span><span id="diskTotal">—</span></div>
-          <div class="progress-bar"><div class="progress-fill" id="diskBar" style="width:0%"></div></div>
+          <div id="disksContainer">
+            <div style="padding:10px 0;color:var(--text2);font-size:0.82rem">Loading drives...</div>
+          </div>
         </div>
 
         <!-- Logs -->
@@ -1604,13 +1605,29 @@ async function loadSystemInfo() {
        document.getElementById('cardOllama').style.display='none';
     }
 
-    // Storage
-    if(d.diskTotal){
-      const used=d.diskTotal-d.diskFree;
-      document.getElementById('diskUsed').textContent=`Used: ${(used/1073741824).toFixed(1)} GB`;
-      document.getElementById('diskTotal').textContent=`Total: ${(d.diskTotal/1073741824).toFixed(1)} GB`;
-      document.getElementById('diskBar').style.width=((used/d.diskTotal)*100).toFixed(1)+'%';
+    // Storage - теперь таблица дисков
+    const container = document.getElementById('disksContainer');
+    if (d.disks && d.disks.length) {
+      let html = `<table style="width:100%;font-size:0.82rem;border-collapse:collapse;">
+        <thead><tr><th style="text-align:left;">Drive</th><th style="text-align:right;">Total</th><th style="text-align:right;">Free</th><th style="text-align:right;">Used %</th></tr></thead><tbody>`;
+      d.disks.forEach(disk => {
+        const total = disk.size / (1024**3);
+        const free = disk.freespace / (1024**3);
+        const used = total - free;
+        const percent = total > 0 ? (used / total * 100).toFixed(1) : 0;
+        html += `<tr>
+          <td>${disk.caption}</td>
+          <td style="text-align:right;">${total.toFixed(2)} GB</td>
+          <td style="text-align:right;">${free.toFixed(2)} GB</td>
+          <td style="text-align:right;">${percent}%</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+      container.innerHTML = html;
+    } else {
+      container.innerHTML = '<div style="padding:10px 0;color:var(--text2);font-size:0.82rem">No drive data available</div>';
     }
+
     // Logs
     loadLogs();
   }catch{showToast('Failed to load system info','error');}

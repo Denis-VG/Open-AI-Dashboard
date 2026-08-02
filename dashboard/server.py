@@ -12,11 +12,15 @@ import subprocess
 import shutil
 import time
 import re
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Union
 from urllib.parse import urlparse, parse_qs
 import traceback
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Third-party libraries
 try:
@@ -154,12 +158,58 @@ def get_system_info() -> Dict:
         'diskFree': 0,
         'diskTotal': 0
     }
-    # Дисковое пространство
+
+    # Получение информации о дисках (Windows и Linux/Mac)
+    disks = []
+    if IS_WIN:
+        try:
+            # Используем wmic для получения информации о всех логических дисках
+            output = subprocess.check_output(
+                ['wmic', 'logicaldisk', 'get', 'caption,size,freespace'],
+                encoding='cp866',  # для русской Windows, можно заменить на 'utf-8'
+                stderr=subprocess.DEVNULL
+            )
+            lines = output.strip().split('\n')
+            for line in lines[1:]:  # пропускаем заголовок
+                parts = line.split()
+                if len(parts) >= 3:
+                    caption = parts[0].strip()
+                    size_str = parts[1].strip()
+                    freespace_str = parts[2].strip()
+                    if size_str != '' and freespace_str != '':
+                        try:
+                            size = int(size_str)
+                            freespace = int(freespace_str)
+                            disks.append({
+                                'caption': caption,
+                                'size': size,
+                                'freespace': freespace
+                            })
+                        except ValueError:
+                            pass
+        except Exception as e:
+            logging.error(f"WMIC disk info failed: {e}")
+    else:
+        # Для Linux/Mac используем df
+        try:
+            output = subprocess.check_output(['df', '-B1', '--output=target,size,avail'], encoding='utf-8')
+            lines = output.strip().split('\n')
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) >= 3:
+                    disks.append({
+                        'caption': parts[0],
+                        'size': int(parts[1]),
+                        'freespace': int(parts[2])
+                    })
+        except Exception as e:
+            logging.error(f"df disk info failed: {e}")
+
+    info['disks'] = disks
+
+    # Дисковое пространство для ROOT_DIR (для обратной совместимости)
     try:
-        if IS_WIN:
-            # Простейший fallback – можно пропустить
-            pass
-        else:
+        if not IS_WIN:
             output = subprocess.check_output(['df', '-k', ROOT_DIR], encoding='utf-8')
             lines = output.strip().split('\n')
             if len(lines) >= 2:
@@ -231,7 +281,6 @@ def get_system_info() -> Dict:
                     }
             except:
                 pass
-        # CPU load fallback – оставляем None
 
     info['memoryTotal'] = memory_info.get('total')
     info['memoryAvailable'] = memory_info.get('available')
@@ -440,7 +489,7 @@ def execute_tool_sync(name: str, args: Dict) -> Dict:
             if file_size > MAX_READ_SIZE:
                 return {
                     'success': False,
-                    'error': f"File too large ({file_size} bytes). Use execute_command with head/tail/grep or request chunked reading (append_file/write_file_chunk).",
+                    'error': f"File too large ({file_size} bytes). Use execute_command with head/tail/grep or request chunked reading.",
                     'size': file_size,
                     'max_allowed': MAX_READ_SIZE
                 }
@@ -571,31 +620,38 @@ async def call_ai_openai(messages: List[Dict], cfg: Dict, include_tools: bool = 
         headers['X-Title'] = 'Portable AI Agent'
 
     async with ClientSession() as session:
-        print("Sending payload with tools:", json.dumps(payload, indent=2))
-        async with session.post(f'{base_url}/chat/completions', json=payload, headers=headers, timeout=60) as resp:
-            data = await resp.json()
-            if resp.status != 200:
-                error_msg = data.get('error', {}).get('message', 'Unknown error')
-                raise Exception(f'API Error: {error_msg} (status {resp.status})')
-            choice = data.get('choices', [{}])[0].get('message', {})
-            if not choice:
-                raise Exception('No response from AI')
-            tool_calls = []
-            for tc in choice.get('tool_calls', []):
-                try:
-                    args = json.loads(tc['function']['arguments'])
-                except:
-                    args = {}
-                tool_calls.append({
-                    'id': tc['id'],
-                    'name': tc['function']['name'],
-                    'args': args
-                })
-            return {
-                'content': choice.get('content', ''),
-                'tool_calls': tool_calls,
-                'raw_message': choice
-            }
+        try:
+            async with session.post(f'{base_url}/chat/completions', json=payload, headers=headers, timeout=60) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    error_msg = data.get('error', {}).get('message', 'Unknown error')
+                    raise Exception(f'API Error: {error_msg} (status {resp.status})')
+                choice = data.get('choices', [{}])[0]
+                if not choice:
+                    raise Exception('No choices in response')
+                message = choice.get('message', {})
+                if not message:
+                    raise Exception('No message in choice')
+
+                tool_calls = []
+                for tc in message.get('tool_calls', []):
+                    try:
+                        args = json.loads(tc.get('function', {}).get('arguments', '{}'))
+                    except (json.JSONDecodeError, KeyError):
+                        args = {}
+                    tool_calls.append({
+                        'id': tc.get('id', ''),
+                        'name': tc.get('function', {}).get('name', ''),
+                        'args': args
+                    })
+                return {
+                    'content': message.get('content', ''),
+                    'tool_calls': tool_calls,
+                    'raw_message': message
+                }
+        except Exception as e:
+            logging.error(f"call_ai_openai error: {e}")
+            raise
 
 
 async def call_ai_anthropic(messages: List[Dict], cfg: Dict, include_tools: bool = True) -> Dict:
@@ -853,18 +909,20 @@ async def run_agent(all_messages, cfg, mode, send_sse):
         try:
             ai_response = await call_ai(all_messages, cfg, include_tools=True)
         except Exception as e:
+            error_details = str(e) if str(e) else f"Unknown error (iteration {iteration+1})"
             if iteration == 0:
                 try:
                     await send_sse({'type': 'agent_reasoning', 'content': 'Tool calling not supported by this model, falling back to chat mode...', 'iteration': 1})
                     ai_response = await call_ai(all_messages, cfg, include_tools=False)
                 except Exception as e2:
-                    error_text = f'⚠️ Agent Error: {str(e2)}'
-                    await send_sse({'type': 'agent_error', 'error': str(e2)})
-                    return error_text
+                    error_details2 = str(e2) if str(e2) else "Unknown error on fallback"
+                    logging.error(f"Agent fallback error: {e2}")
+                    await send_sse({'type': 'agent_error', 'error': error_details2})
+                    return f'⚠️ Agent Error: {error_details2}'
             else:
-                error_text = f'⚠️ Agent Error: {str(e)}'
-                await send_sse({'type': 'agent_error', 'error': str(e)})
-                return error_text
+                logging.error(f"Agent error: {e}")
+                await send_sse({'type': 'agent_error', 'error': error_details})
+                return f'⚠️ Agent Error: {error_details}'
 
         # ---- Парсинг JSON-инструментов из текста (с поддержкой тегов <tools>) ----
         if not ai_response.get('tool_calls') and ai_response.get('content'):
@@ -898,8 +956,8 @@ async def run_agent(all_messages, cfg, mode, send_sse):
                         ai_response['tool_calls'] = [tool_call]
                         ai_response['content'] = ''
                         await send_sse({'type': 'agent_reasoning', 'content': f'⏳ Executing tool: {parsed["name"]}', 'iteration': iteration + 1})
-                except (json.JSONDecodeError, KeyError, IndexError):
-                    pass
+                except (json.JSONDecodeError, KeyError, IndexError, TypeError) as parse_err:
+                    logging.debug(f"JSON parse error in agent: {parse_err} for input: {json_str[:200]}")
 
         if ai_response.get('content') and ai_response.get('tool_calls'):
             await send_sse({'type': 'agent_reasoning', 'content': ai_response['content'], 'iteration': iteration + 1})
