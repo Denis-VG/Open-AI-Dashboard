@@ -5,6 +5,7 @@ Writes timestamped logs to .app_data/ in the project root.
 
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -16,9 +17,14 @@ APP_DATA_DIR = os.path.join(ROOT_DIR, '.app_data')
 _SENSITIVE_KEYS = {'api_key', 'apikey', 'authorization', 'x-api-key', 'key',
                    'token', 'secret', 'password', 'api-key'}
 
+# Pattern to mask API keys in URL query strings
+_KEY_IN_URL = re.compile(r'(key|api_key|apikey|token)=([^&\s]+)', re.IGNORECASE)
+# Pattern to mask Bearer tokens in string values
+_BEARER_TOKEN = re.compile(r'Bearer\s+\S+', re.IGNORECASE)
+
 
 def _mask_sensitive(obj: Any) -> Any:
-    """Recursively mask sensitive values in a dict/list."""
+    """Recursively mask sensitive values in a dict/list/str."""
     if isinstance(obj, dict):
         return {
             k: '***' if k.lower().replace('_', '-') in _SENSITIVE_KEYS
@@ -27,6 +33,12 @@ def _mask_sensitive(obj: Any) -> Any:
         }
     if isinstance(obj, list):
         return [_mask_sensitive(v) for v in obj]
+    if isinstance(obj, str):
+        # Mask API keys embedded in URLs
+        obj = _KEY_IN_URL.sub(r'\1=***', obj)
+        # Mask Bearer tokens
+        obj = _BEARER_TOKEN.sub('Bearer ***', obj)
+        return obj
     return obj
 
 

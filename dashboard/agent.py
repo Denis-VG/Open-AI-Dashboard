@@ -26,6 +26,13 @@ EventSink = Callable[[dict], Awaitable[None]]
 
 MAX_ITERATIONS = 15
 
+# Error substrings that indicate the model doesn't support tools.
+# Only these trigger a fallback to no-tool mode on iteration 0.
+_TOOL_UNSUPPORTED_MARKERS = (
+    'tool', 'function', 'not support', 'unrecognized', 'unknown parameter',
+    'does not support', 'invalid parameter', 'not allowed',
+)
+
 SYSTEM_PROMPTS = {
     'normal': (
         'You are a powerful AI coding agent running in a web dashboard. '
@@ -63,7 +70,7 @@ class AgentLoop:
         self._approval = approval
         self._work_dir = work_dir
 
-    # ── public API ──────────────────────────────────────────────────
+    # ── public API ───────────────────────────────────────────────────────────
 
     async def run(
         self,
@@ -99,7 +106,7 @@ class AgentLoop:
             if ai_response is None:
                 return final_text  # error already reported by _call_ai_safely
 
-            # ── try to parse JSON tool-calls from text ──────────────
+            # ── try to parse JSON tool-calls from text ───────────────────────
             self._extract_inline_tools(ai_response, on_event, iteration)
 
             # Emit reasoning if both text and tools are present
@@ -110,13 +117,13 @@ class AgentLoop:
                     'iteration': iteration + 1,
                 })
 
-            # ── execute tool calls ───────────────────────────────────
+            # ── execute tool calls ───────────────────────────────────────────
             if ai_response.get('tool_calls'):
                 self._provider.append_assistant(messages, ai_response)
                 await self._execute_tools(ai_response['tool_calls'], messages, mode, on_event)
                 continue  # next iteration
 
-            # ── no tool calls → final text ──────────────────────────
+            # ── no tool calls → final text ───────────────────────────────────
             final_text = ai_response.get('content', '')
             if final_text:
                 await on_event({'type': 'agent_text', 'content': final_text})
@@ -125,7 +132,7 @@ class AgentLoop:
         await on_event({'type': 'done', 'fullText': final_text})
         return final_text
 
-    # ── helpers ─────────────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────────────────
 
     def _inject_system(self, messages: list[dict], mode: str) -> None:
         """Remove existing system messages and prepend the appropriate one."""
@@ -136,15 +143,25 @@ class AgentLoop:
         )
         messages.insert(0, {'role': 'system', 'content': sys_content})
 
+    def _looks_like_tool_error(self, err: str) -> bool:
+        """Return True if the error message indicates the model doesn't
+        support tools/function-calling (i.e. a fallback is worth trying)."""
+        err_lower = err.lower()
+        return any(marker in err_lower for marker in _TOOL_UNSUPPORTED_MARKERS)
+
     async def _call_ai_safely(
         self, messages: list[dict], on_event: EventSink, iteration: int
     ) -> dict | None:
-        """Call AI; on first-iteration error, fall back to no-tools mode."""
+        """Call AI; on first-iteration tool-related errors, fall back to
+        no-tools mode.  Non-tool errors (auth, connectivity, bad model, …)
+        are reported immediately without a pointless retry."""
         try:
             return await self._provider.call(messages, read_config(), include_tools=True)
         except Exception as exc:
             err = str(exc) or 'Unknown error'
-            if iteration == 0:
+
+            # Only attempt fallback on errors that smell like tool-related issues
+            if iteration == 0 and self._looks_like_tool_error(err):
                 try:
                     await on_event({
                         'type': 'agent_reasoning',
@@ -157,6 +174,8 @@ class AgentLoop:
                     logger.error(f'Agent fallback error: {exc2}')
                     await on_event({'type': 'agent_error', 'error': err2})
                     return None
+
+            # Either not first iteration, or error doesn't look tool-related
             logger.error(f'Agent error: {exc}')
             await on_event({'type': 'agent_error', 'error': err})
             return None
@@ -245,7 +264,7 @@ class AgentLoop:
             })
 
 
-# ── tiny import helper (avoids circular imports) ────────────────────
+# ── tiny import helper (avoids circular imports) ─────────────────────────────
 
 def read_config() -> dict[str, str]:
     from .config import read_config as _rc

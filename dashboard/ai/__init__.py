@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 # Default timeout for AI API calls (seconds)
 _API_TIMEOUT = 60
 
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+async def _safe_read_json(resp) -> dict:
+    """Read response body as text first, then try JSON.
+    
+    Some providers (e.g. DeepSeek) return non-JSON content-types
+    (application/octet-stream) even for error responses.  Calling
+    resp.json() directly crashes before we can inspect the real error.
+    """
+    raw = await resp.text()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Return a synthetic dict so error-handling code still works
+        return {'_raw_body': raw, '_parse_error': True}
+
+
 # ── abstract base ────────────────────────────────────────────────────────────
 
 class AIProvider(ABC):
@@ -89,9 +107,15 @@ class OpenAIProvider(AIProvider):
                     json=payload, headers=headers,
                     timeout=ClientTimeout(total=_API_TIMEOUT)
                 ) as resp:
-                    data = await resp.json()
+                    data = await _safe_read_json(resp)
+
                     if resp.status != 200:
-                        err = data.get('error', {}).get('message', 'Unknown error')
+                        err = data.get('error', {})
+                        if isinstance(err, dict):
+                            err = err.get('message', 'Unknown error')
+                        raw_body = data.get('_raw_body', '')
+                        if raw_body and not isinstance(err, str):
+                            err = raw_body[:500]
                         raise Exception(f'API Error: {err} (status {resp.status})')
 
                     choice = data.get('choices', [{}])[0]
@@ -151,7 +175,7 @@ class OpenAIProvider(AIProvider):
         })
 
 
-# ── Anthropic ─────────────────────────────────────────────────────────────────
+# ── Anthropic ────────────────────────────────────────────────────────────────
 
 class AnthropicProvider(AIProvider):
     """Anthropic Claude API."""
@@ -193,9 +217,15 @@ class AnthropicProvider(AIProvider):
                     json=payload, headers=headers,
                     timeout=ClientTimeout(total=_API_TIMEOUT)
                 ) as resp:
-                    data = await resp.json()
+                    data = await _safe_read_json(resp)
+
                     if resp.status != 200:
-                        err = data.get('error', {}).get('message', 'Unknown error')
+                        err = data.get('error', {})
+                        if isinstance(err, dict):
+                            err = err.get('message', 'Unknown error')
+                        raw_body = data.get('_raw_body', '')
+                        if raw_body and not isinstance(err, str):
+                            err = raw_body[:500]
                         raise Exception(f'Anthropic API Error: {err}')
 
                     content = data.get('content', [])
@@ -242,7 +272,7 @@ class AnthropicProvider(AIProvider):
         })
 
 
-# ── Gemini ────────────────────────────────────────────────────────────────────
+# ── Gemini ───────────────────────────────────────────────────────────────────
 
 class GeminiProvider(AIProvider):
     """Google Gemini API."""
@@ -289,9 +319,15 @@ class GeminiProvider(AIProvider):
                     headers={'Content-Type': 'application/json'},
                     timeout=ClientTimeout(total=_API_TIMEOUT)
                 ) as resp:
-                    data = await resp.json()
+                    data = await _safe_read_json(resp)
+
                     if resp.status != 200:
-                        err = data.get('error', {}).get('message', 'Unknown error')
+                        err = data.get('error', {})
+                        if isinstance(err, dict):
+                            err = err.get('message', 'Unknown error')
+                        raw_body = data.get('_raw_body', '')
+                        if raw_body and not isinstance(err, str):
+                            err = raw_body[:500]
                         raise Exception(f'Gemini API Error: {err}')
 
                     candidates = data.get('candidates', [])
@@ -348,7 +384,7 @@ class GeminiProvider(AIProvider):
         })
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _try_get_response(exc: Exception, default: Any = None) -> Any:
     """Attempt to extract response data from an exception if available."""
@@ -368,7 +404,7 @@ def _try_get_response(exc: Exception, default: Any = None) -> Any:
     return default
 
 
-# ── factory ───────────────────────────────────────────────────────────────────
+# ── factory ──────────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, type[AIProvider]] = {
     'openai': OpenAIProvider,

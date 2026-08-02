@@ -22,7 +22,7 @@ from ..sse import SSEWriter
 from ..error_logger import log_api_error
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _sse_response() -> StreamResponse:
     return StreamResponse(
@@ -52,7 +52,7 @@ def _save_assistant_reply(
     store.save(chat_id, existing)
 
 
-# ── agent (tool‑calling loop) ─────────────────────────────────────────────────
+# ── agent (tool‑calling loop) ────────────────────────────────────────────────
 
 async def _agent(req: Request) -> StreamResponse:
     data = await req.json()
@@ -87,16 +87,17 @@ async def _agent(req: Request) -> StreamResponse:
         if chat_id and full_text:
             _save_assistant_reply(store, chat_id, user_message, full_text)
     except Exception as e:
-        error_text = f' Agent Error: {str(e)}'
+        # ❌ Do NOT save the error as an assistant reply — that creates a
+        #    feedback loop where the model sees "⚠️ Agent Error: ..." as
+        #    its own reply, and on next request the user message is repeated,
+        #    creating an ever-growing error chain.
         await sse.send({'type': 'agent_error', 'error': str(e)})
-        if chat_id:
-            _save_assistant_reply(store, chat_id, user_message, error_text)
 
     await sse.close()
     return resp
 
 
-# ── chat (simple streaming, no tools) ─────────────────────────────────────────
+# ── chat (simple streaming, no tools) ────────────────────────────────────────
 
 async def _chat(req: Request) -> StreamResponse:
     data = await req.json()
@@ -157,7 +158,7 @@ async def _chat(req: Request) -> StreamResponse:
     return resp
 
 
-# ── streaming helpers (chat route internals) ──────────────────────────────────
+# ── streaming helpers (chat route internals) ─────────────────────────────────
 
 async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
     """Stream a chat completion through SSE, returning the full text."""
@@ -291,7 +292,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
     return ''
 
 
-# ── approval ──────────────────────────────────────────────────────────────────
+# ── approval ─────────────────────────────────────────────────────────────────
 
 async def _agent_approve(req: Request) -> web.Response:
     data = await req.json()
@@ -302,7 +303,7 @@ async def _agent_approve(req: Request) -> web.Response:
     return web.json_response({'success': found})
 
 
-# ── workdir ───────────────────────────────────────────────────────────────────
+# ── workdir ──────────────────────────────────────────────────────────────────
 
 async def _workdir_get(req: Request) -> web.Response:
     tools: ToolRegistry = req.app['tool_registry']
@@ -321,7 +322,7 @@ async def _workdir_post(req: Request) -> web.Response:
     return web.json_response({'success': True, 'workDir': abs_path})
 
 
-# ── launch ────────────────────────────────────────────────────────────────────
+# ── launch ───────────────────────────────────────────────────────────────────
 
 async def _launch(req: Request) -> web.Response:
     data = await req.json()
@@ -350,7 +351,7 @@ async def _launch(req: Request) -> web.Response:
         return web.json_response({'error': str(e)}, status=500)
 
 
-# ── register ──────────────────────────────────────────────────────────────────
+# ── register ─────────────────────────────────────────────────────────────────
 
 def register(app: web.Application) -> None:
     app.router.add_post('/api/agent', _agent)
