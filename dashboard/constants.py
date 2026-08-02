@@ -12,7 +12,10 @@ DATA_DIR = os.path.join(ROOT_DIR, 'data')
 ENV_FILE = os.path.join(DATA_DIR, 'ai_settings.env')
 CHATS_DIR = os.path.join(DATA_DIR, 'chats')
 HTML_FILE = os.path.join(__dirname, 'index.html')
-PORT = 3000
+
+# Host/port — configurable via environment variables
+HOST = os.environ.get('HOST', '127.0.0.1')
+PORT = int(os.environ.get('PORT', '3000'))
 
 IS_WIN = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'

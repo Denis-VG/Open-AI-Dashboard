@@ -36,3 +36,21 @@ def write_config(config: dict[str, str]) -> None:
         lines.append(f'{key}={value}')
     with open(ENV_FILE, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
+
+
+def ensure_defaults() -> None:
+    """Ensure ai_settings.env exists with reasonable defaults.
+
+    If the file does not exist or has no AI_PROVIDER key, writes
+    a minimal stub so the dashboard is usable on first launch.
+    """
+    config = read_config()
+
+    dirty = False
+
+    if 'AI_PROVIDER' not in config:
+        config['AI_PROVIDER'] = 'openai'
+        dirty = True
+
+    if dirty:
+        write_config(config)

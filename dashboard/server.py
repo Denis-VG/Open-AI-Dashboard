@@ -37,18 +37,20 @@ from dashboard.routes import register_all
 from dashboard.chat_store import ChatStore
 from dashboard.approval import ApprovalManager
 from dashboard.tools import ToolRegistry
-from dashboard.constants import PORT, ROOT_DIR, CHATS_DIR
+from dashboard.config import ensure_defaults
+from dashboard.constants import PORT, HOST, CHATS_DIR
 
 
-async def create_app() -> web.Application:
+async def create_app(work_dir: str) -> web.Application:
     app = web.Application()
 
-    # ── infrastructure singletons (DI via app dict) ──────────────────
+    # ── infrastructure singletons (DI via app dict) ───────────────────
     app['chat_store'] = ChatStore(CHATS_DIR)
     app['approval'] = ApprovalManager()
-    app['tool_registry'] = ToolRegistry(ROOT_DIR)
+    app['tool_registry'] = ToolRegistry(work_dir)
+    app['work_dir'] = work_dir
 
-    # ── CORS middleware ──────────────────────────────────────────────
+    # ── CORS middleware ────────────────────────────────────────────────
     @web.middleware
     async def cors_middleware(request: web.Request, handler):
         if request.method == 'OPTIONS':
@@ -66,14 +68,20 @@ async def create_app() -> web.Application:
 
     app.middlewares.append(cors_middleware)
 
-    # ── routes ───────────────────────────────────────────────────────
+    # ── routes ─────────────────────────────────────────────────────────
     register_all(app)
 
     return app
 
 
 if __name__ == '__main__':
-    print(f'\n  Dashboard running at http://localhost:{PORT}')
-    print(f'  Agent working directory: {ROOT_DIR}')
+    # Working directory follows the user's cwd at startup
+    WORK_DIR = os.path.realpath(os.getcwd())
+
+    # Create config with sensible defaults on first launch
+    ensure_defaults()
+
+    print(f'\n  Dashboard running at http://{HOST}:{PORT}')
+    print(f'  Agent working directory: {WORK_DIR}')
     print('  Press Ctrl+C to stop.\n')
-    web.run_app(create_app(), port=PORT)
+    web.run_app(create_app(WORK_DIR), host=HOST, port=PORT)
