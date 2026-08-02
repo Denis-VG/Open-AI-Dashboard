@@ -1,0 +1,10 @@
+.app_data/
+.pycache/
+Lib/
+Scripts/
+data/chats/
+data/ai_settings.env
+OpenClaudeWinDDK.cmd
+OpenClaudeWinSDK.cmd
+pyvenv.cfg
+CACHEDIR.TAG
