@@ -19,9 +19,10 @@ from ..config import read_config
 from ..constants import IS_WIN, IS_MAC, ROOT_DIR
 from ..tools import ToolRegistry
 from ..sse import SSEWriter
+from ..error_logger import log_api_error
 
 
-# ── helpers ─────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _sse_response() -> StreamResponse:
     return StreamResponse(
@@ -51,7 +52,7 @@ def _save_assistant_reply(
     store.save(chat_id, existing)
 
 
-# ── agent (tool‑calling loop) ────────────────────────────────────────
+# ── agent (tool‑calling loop) ─────────────────────────────────────────────────
 
 async def _agent(req: Request) -> StreamResponse:
     data = await req.json()
@@ -95,7 +96,7 @@ async def _agent(req: Request) -> StreamResponse:
     return resp
 
 
-# ── chat (simple streaming, no tools) ────────────────────────────────
+# ── chat (simple streaming, no tools) ─────────────────────────────────────────
 
 async def _chat(req: Request) -> StreamResponse:
     data = await req.json()
@@ -156,7 +157,7 @@ async def _chat(req: Request) -> StreamResponse:
     return resp
 
 
-# ── streaming helpers (chat route internals) ────────────────────────
+# ── streaming helpers (chat route internals) ──────────────────────────────────
 
 async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
     """Stream a chat completion through SSE, returning the full text."""
@@ -179,27 +180,34 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
             headers['HTTP-Referer'] = 'http://localhost:3000'
             headers['X-Title'] = 'Portable AI Dashboard'
 
-        full_text = ''
-        async with ClientSession() as session:
-            async with session.post(
-                f'{base_url}/chat/completions', json=payload, headers=headers, timeout=60
-            ) as resp:
-                async for line in resp.content:
-                    line = line.decode('utf-8').strip()
-                    if not line.startswith('data: '):
-                        continue
-                    raw = line[6:].strip()
-                    if raw == '[DONE]':
-                        continue
-                    try:
-                        parsed = json.loads(raw)
-                        delta = parsed.get('choices', [{}])[0].get('delta', {}).get('content', '')
-                        if delta:
-                            full_text += delta
-                            await sse.send({'type': 'delta', 'content': delta})
-                    except Exception:
-                        pass
-        return full_text
+        try:
+            full_text = ''
+            async with ClientSession() as session:
+                async with session.post(
+                    f'{base_url}/chat/completions', json=payload, headers=headers, timeout=60
+                ) as resp:
+                    if resp.status != 200:
+                        error_body = await resp.text()
+                        raise Exception(f'API Error: status {resp.status}, body: {error_body[:1000]}')
+                    async for line in resp.content:
+                        line = line.decode('utf-8').strip()
+                        if not line.startswith('data: '):
+                            continue
+                        raw = line[6:].strip()
+                        if raw == '[DONE]':
+                            continue
+                        try:
+                            parsed = json.loads(raw)
+                            delta = parsed.get('choices', [{}])[0].get('delta', {}).get('content', '')
+                            if delta:
+                                full_text += delta
+                                await sse.send({'type': 'delta', 'content': delta})
+                        except Exception:
+                            pass
+            return full_text
+        except Exception as exc:
+            log_api_error(provider, str(exc), payload, None)
+            raise
 
     # ── Anthropic ──
     if provider == 'anthropic':
@@ -214,24 +222,32 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
             'x-api-key': api_key,
             'anthropic-version': '2023-06-01',
         }
-        full_text = ''
-        async with ClientSession() as session:
-            async with session.post(
-                'https://api.anthropic.com/v1/messages', json=payload, headers=headers, timeout=60
-            ) as resp:
-                async for line in resp.content:
-                    line = line.decode('utf-8').strip()
-                    if not line.startswith('data: '):
-                        continue
-                    try:
-                        parsed = json.loads(line[6:])
-                        delta = parsed.get('delta', {}).get('text', '')
-                        if delta:
-                            full_text += delta
-                            await sse.send({'type': 'delta', 'content': delta})
-                    except Exception:
-                        pass
-        return full_text
+
+        try:
+            full_text = ''
+            async with ClientSession() as session:
+                async with session.post(
+                    'https://api.anthropic.com/v1/messages', json=payload, headers=headers, timeout=60
+                ) as resp:
+                    if resp.status != 200:
+                        error_body = await resp.text()
+                        raise Exception(f'Anthropic API Error: status {resp.status}, body: {error_body[:1000]}')
+                    async for line in resp.content:
+                        line = line.decode('utf-8').strip()
+                        if not line.startswith('data: '):
+                            continue
+                        try:
+                            parsed = json.loads(line[6:])
+                            delta = parsed.get('delta', {}).get('text', '')
+                            if delta:
+                                full_text += delta
+                                await sse.send({'type': 'delta', 'content': delta})
+                        except Exception:
+                            pass
+            return full_text
+        except Exception as exc:
+            log_api_error('anthropic', str(exc), payload, None)
+            raise
 
     # ── Gemini ──
     if provider == 'gemini':
@@ -241,28 +257,41 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
             role = 'model' if m.get('role') == 'assistant' else 'user'
             gem_messages.append({'role': role, 'parts': [{'text': m.get('content', '')}]})
         payload = {'contents': gem_messages}
+        safe_url = (
+            f'https://generativelanguage.googleapis.com/v1beta/models/{gem_model}:streamGenerateContent'
+            f'?key=***'
+        )
         url = (
             f'https://generativelanguage.googleapis.com/v1beta/models/{gem_model}:streamGenerateContent'
             f'?key={api_key}'
         )
-        full_text = ''
-        async with ClientSession() as session:
-            async with session.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=60) as resp:
-                async for chunk in resp.content:
-                    chunk = chunk.decode('utf-8')
-                    matches = _re.findall(r'"text":\s*"((?:[^"\\]|\\.)*)"', chunk)
-                    for m in matches:
-                        text = json.loads('{' + m + '}').get('text', '')
-                        if text:
-                            full_text += text
-                            await sse.send({'type': 'delta', 'content': text})
-        return full_text
+
+        try:
+            full_text = ''
+            async with ClientSession() as session:
+                async with session.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=60) as resp:
+                    if resp.status != 200:
+                        error_body = await resp.text()
+                        raise Exception(f'Gemini API Error: status {resp.status}, body: {error_body[:1000]}')
+                    async for chunk in resp.content:
+                        chunk = chunk.decode('utf-8')
+                        matches = _re.findall(r'"text":\s*"((?:[^"\\]|\\.)*)"', chunk)
+                        for m in matches:
+                            text = json.loads('{' + m + '}').get('text', '')
+                            if text:
+                                full_text += text
+                                await sse.send({'type': 'delta', 'content': text})
+            return full_text
+        except Exception as exc:
+            log_api_error('gemini', str(exc),
+                          {'url': safe_url, 'payload': payload}, None)
+            raise
 
     await sse.send({'type': 'error', 'content': 'Provider not configured or unsupported.'})
     return ''
 
 
-# ── approval ────────────────────────────────────────────────────────
+# ── approval ──────────────────────────────────────────────────────────────────
 
 async def _agent_approve(req: Request) -> web.Response:
     data = await req.json()
@@ -273,7 +302,7 @@ async def _agent_approve(req: Request) -> web.Response:
     return web.json_response({'success': found})
 
 
-# ── workdir ─────────────────────────────────────────────────────────
+# ── workdir ───────────────────────────────────────────────────────────────────
 
 async def _workdir_get(req: Request) -> web.Response:
     tools: ToolRegistry = req.app['tool_registry']
@@ -292,7 +321,7 @@ async def _workdir_post(req: Request) -> web.Response:
     return web.json_response({'success': True, 'workDir': abs_path})
 
 
-# ── launch ──────────────────────────────────────────────────────────
+# ── launch ────────────────────────────────────────────────────────────────────
 
 async def _launch(req: Request) -> web.Response:
     data = await req.json()
@@ -321,7 +350,7 @@ async def _launch(req: Request) -> web.Response:
         return web.json_response({'error': str(e)}, status=500)
 
 
-# ── register ────────────────────────────────────────────────────────
+# ── register ──────────────────────────────────────────────────────────────────
 
 def register(app: web.Application) -> None:
     app.router.add_post('/api/agent', _agent)

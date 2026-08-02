@@ -20,13 +20,14 @@ from typing import Any
 from aiohttp import ClientSession, ClientTimeout
 
 from ..tools import ToolRegistry
+from ..error_logger import log_api_error
 
 logger = logging.getLogger(__name__)
 
 # Default timeout for AI API calls (seconds)
 _API_TIMEOUT = 60
 
-# ── abstract base ────────────────────────────────────────────────────
+# ── abstract base ────────────────────────────────────────────────────────────
 
 class AIProvider(ABC):
     """Abstract AI provider."""
@@ -53,7 +54,7 @@ class AIProvider(ABC):
         ...
 
 
-# ── OpenAI / Ollama (shared OpenAI-compatible protocol) ───────────────
+# ── OpenAI / Ollama (shared OpenAI-compatible protocol) ──────────────────────
 
 class OpenAIProvider(AIProvider):
     """OpenAI, Ollama, OpenRouter, and any OpenAI-compatible endpoint."""
@@ -81,41 +82,46 @@ class OpenAIProvider(AIProvider):
             headers['HTTP-Referer'] = 'http://localhost:3000'
             headers['X-Title'] = 'Portable AI Agent'
 
-        async with ClientSession() as session:
-            async with session.post(
-                f'{base_url}/chat/completions',
-                json=payload, headers=headers,
-                timeout=ClientTimeout(total=_API_TIMEOUT)
-            ) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    err = data.get('error', {}).get('message', 'Unknown error')
-                    raise Exception(f'API Error: {err} (status {resp.status})')
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    f'{base_url}/chat/completions',
+                    json=payload, headers=headers,
+                    timeout=ClientTimeout(total=_API_TIMEOUT)
+                ) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        err = data.get('error', {}).get('message', 'Unknown error')
+                        raise Exception(f'API Error: {err} (status {resp.status})')
 
-                choice = data.get('choices', [{}])[0]
-                if not choice:
-                    raise Exception('No choices in response')
-                message = choice.get('message', {})
-                if not message:
-                    raise Exception('No message in choice')
+                    choice = data.get('choices', [{}])[0]
+                    if not choice:
+                        raise Exception('No choices in response')
+                    message = choice.get('message', {})
+                    if not message:
+                        raise Exception('No message in choice')
 
-                tool_calls = []
-                for tc in message.get('tool_calls', []):
-                    try:
-                        args = json.loads(tc.get('function', {}).get('arguments', '{}'))
-                    except (json.JSONDecodeError, KeyError):
-                        args = {}
-                    tool_calls.append({
-                        'id': tc.get('id', ''),
-                        'name': tc.get('function', {}).get('name', ''),
-                        'args': args,
-                    })
+                    tool_calls = []
+                    for tc in message.get('tool_calls', []):
+                        try:
+                            args = json.loads(tc.get('function', {}).get('arguments', '{}'))
+                        except (json.JSONDecodeError, KeyError):
+                            args = {}
+                        tool_calls.append({
+                            'id': tc.get('id', ''),
+                            'name': tc.get('function', {}).get('name', ''),
+                            'args': args,
+                        })
 
-                return {
-                    'content': message.get('content', ''),
-                    'tool_calls': tool_calls,
-                    'raw_message': message,
-                }
+                    return {
+                        'content': message.get('content', ''),
+                        'tool_calls': tool_calls,
+                        'raw_message': message,
+                    }
+        except Exception as exc:
+            log_api_error('openai', str(exc), payload,
+                          _try_get_response(exc, None))
+            raise
 
     def append_assistant(self, messages: list[dict], ai_response: dict) -> None:
         if 'raw_message' in ai_response:
@@ -145,7 +151,7 @@ class OpenAIProvider(AIProvider):
         })
 
 
-# ── Anthropic ────────────────────────────────────────────────────────
+# ── Anthropic ─────────────────────────────────────────────────────────────────
 
 class AnthropicProvider(AIProvider):
     """Anthropic Claude API."""
@@ -180,29 +186,34 @@ class AnthropicProvider(AIProvider):
             'anthropic-version': '2023-06-01',
         }
 
-        async with ClientSession() as session:
-            async with session.post(
-                'https://api.anthropic.com/v1/messages',
-                json=payload, headers=headers,
-                timeout=ClientTimeout(total=_API_TIMEOUT)
-            ) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    err = data.get('error', {}).get('message', 'Unknown error')
-                    raise Exception(f'Anthropic API Error: {err}')
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    'https://api.anthropic.com/v1/messages',
+                    json=payload, headers=headers,
+                    timeout=ClientTimeout(total=_API_TIMEOUT)
+                ) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        err = data.get('error', {}).get('message', 'Unknown error')
+                        raise Exception(f'Anthropic API Error: {err}')
 
-                content = data.get('content', [])
-                text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
-                tool_parts = [c for c in content if c.get('type') == 'tool_use']
+                    content = data.get('content', [])
+                    text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
+                    tool_parts = [c for c in content if c.get('type') == 'tool_use']
 
-                return {
-                    'content': '\n'.join(text_parts),
-                    'tool_calls': [
-                        {'id': tc['id'], 'name': tc['name'], 'args': tc.get('input', {})}
-                        for tc in tool_parts
-                    ],
-                    'stop_reason': data.get('stop_reason'),
-                }
+                    return {
+                        'content': '\n'.join(text_parts),
+                        'tool_calls': [
+                            {'id': tc['id'], 'name': tc['name'], 'args': tc.get('input', {})}
+                            for tc in tool_parts
+                        ],
+                        'stop_reason': data.get('stop_reason'),
+                    }
+        except Exception as exc:
+            log_api_error('anthropic', str(exc), payload,
+                          _try_get_response(exc, None))
+            raise
 
     def append_assistant(self, messages: list[dict], ai_response: dict) -> None:
         content = []
@@ -231,7 +242,7 @@ class AnthropicProvider(AIProvider):
         })
 
 
-# ── Gemini ───────────────────────────────────────────────────────────
+# ── Gemini ────────────────────────────────────────────────────────────────────
 
 class GeminiProvider(AIProvider):
     """Google Gemini API."""
@@ -265,37 +276,50 @@ class GeminiProvider(AIProvider):
             f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
             f'?key={api_key}'
         )
-        async with ClientSession() as session:
-            async with session.post(
-                url, json=payload,
-                headers={'Content-Type': 'application/json'},
-                timeout=ClientTimeout(total=_API_TIMEOUT)
-            ) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    err = data.get('error', {}).get('message', 'Unknown error')
-                    raise Exception(f'Gemini API Error: {err}')
+        # Mask the key in the logged URL
+        safe_url = (
+            f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+            f'?key=***'
+        )
 
-                candidates = data.get('candidates', [])
-                if not candidates:
-                    raise Exception('No response from Gemini')
-                parts = candidates[0].get('content', {}).get('parts', [])
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    url, json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=ClientTimeout(total=_API_TIMEOUT)
+                ) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        err = data.get('error', {}).get('message', 'Unknown error')
+                        raise Exception(f'Gemini API Error: {err}')
 
-                text_parts = [p['text'] for p in parts if 'text' in p]
-                func_parts = [p for p in parts if 'functionCall' in p]
+                    candidates = data.get('candidates', [])
+                    if not candidates:
+                        raise Exception('No response from Gemini')
+                    parts = candidates[0].get('content', {}).get('parts', [])
 
-                tool_calls = []
-                for idx, p in enumerate(func_parts):
-                    tool_calls.append({
-                        'id': f'gemini_call_{int(time.time() * 1000)}_{idx}',
-                        'name': p['functionCall']['name'],
-                        'args': p['functionCall'].get('args', {}),
-                    })
+                    text_parts = [p['text'] for p in parts if 'text' in p]
+                    func_parts = [p for p in parts if 'functionCall' in p]
 
-                return {
-                    'content': '\n'.join(text_parts),
-                    'tool_calls': tool_calls,
-                }
+                    tool_calls = []
+                    for idx, p in enumerate(func_parts):
+                        tool_calls.append({
+                            'id': f'gemini_call_{int(time.time() * 1000)}_{idx}',
+                            'name': p['functionCall']['name'],
+                            'args': p['functionCall'].get('args', {}),
+                        })
+
+                    return {
+                        'content': '\n'.join(text_parts),
+                        'tool_calls': tool_calls,
+                    }
+        except Exception as exc:
+            # Log the payload + masked URL as request body
+            log_api_error('gemini', str(exc),
+                          {'url': safe_url, 'payload': payload},
+                          _try_get_response(exc, None))
+            raise
 
     def append_assistant(self, messages: list[dict], ai_response: dict) -> None:
         parts = []
@@ -324,7 +348,27 @@ class GeminiProvider(AIProvider):
         })
 
 
-# ── factory ──────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _try_get_response(exc: Exception, default: Any = None) -> Any:
+    """Attempt to extract response data from an exception if available."""
+    # Some aiohttp exceptions may carry the response; try common patterns
+    for attr in ('response', 'resp', 'body'):
+        val = getattr(exc, attr, None)
+        if val is not None:
+            try:
+                if hasattr(val, 'json'):
+                    return val.json()
+            except Exception:
+                pass
+            try:
+                return str(val)[:5000]
+            except Exception:
+                pass
+    return default
+
+
+# ── factory ───────────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, type[AIProvider]] = {
     'openai': OpenAIProvider,
