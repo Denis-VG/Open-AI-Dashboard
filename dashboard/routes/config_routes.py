@@ -8,14 +8,14 @@ from aiohttp import web
 from aiohttp.web import Request
 
 from ..config import read_config, write_config
-from ..constants import ENV_FILE, HTML_FILE, __dirname
+from ..constants import ENV_FILE, HTML_FILE, SERVER_DIR
 
 
 async def handle_index(_request: Request) -> web.Response:
     """Serve the dashboard SPA."""
     possible = [
-        os.path.join(__dirname, 'index.html'),
-        os.path.join(__dirname, 'index.htm'),
+        os.path.join(SERVER_DIR, 'index.html'),
+        os.path.join(SERVER_DIR, 'index.htm'),
     ]
     for path in possible:
         if os.path.exists(path):

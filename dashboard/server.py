@@ -18,6 +18,14 @@ The heavy-lifting code lives in:
 import sys
 import os
 
+# Ensure the project root is on sys.path so that "dashboard.xxx" imports
+# work regardless of whether this file is run as:
+#   python dashboard/server.py   (script)
+#   python -m dashboard.server   (module)
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 # Ensure third-party packages are available
 try:
     from aiohttp import web
@@ -25,11 +33,11 @@ except ImportError:
     print("Please install aiohttp: pip install aiohttp")
     sys.exit(1)
 
-from .routes import register_all
-from .chat_store import ChatStore
-from .approval import ApprovalManager
-from .tools import ToolRegistry
-from .constants import PORT, ROOT_DIR, CHATS_DIR
+from dashboard.routes import register_all
+from dashboard.chat_store import ChatStore
+from dashboard.approval import ApprovalManager
+from dashboard.tools import ToolRegistry
+from dashboard.constants import PORT, ROOT_DIR, CHATS_DIR
 
 
 async def create_app() -> web.Application:
@@ -58,7 +66,7 @@ async def create_app() -> web.Application:
 
     app.middlewares.append(cors_middleware)
 
-    # ── routes ──────────────────────────────────────────────────────
+    # ── routes ───────────────────────────────────────────────────────
     register_all(app)
 
     return app

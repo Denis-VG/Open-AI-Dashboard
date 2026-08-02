@@ -6,6 +6,7 @@ import os
 import sys
 
 __dirname = os.path.dirname(os.path.abspath(__file__))
+SERVER_DIR = __dirname  # public alias
 ROOT_DIR = os.path.join(__dirname, '..')
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
 ENV_FILE = os.path.join(DATA_DIR, 'ai_settings.env')
