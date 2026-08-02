@@ -366,8 +366,8 @@ select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%
     <div class="sidebar-divider"></div>
     <div class="info-panel">
       <div class="info-row"><span class="info-label">Provider</span><span class="info-val" id="sbProvider">—</span></div>
+      <div class="info-row"><span class="info-label">Provider URL</span><span class="info-val" id="sbProviderURL">—</span></div>
       <div class="info-row"><span class="info-label">Model</span><span class="info-val" id="sbModel">—</span></div>
-      <div class="info-row"><span class="info-label">Engine</span><span class="info-val" id="sbEngine">—</span></div>
       <div class="info-row"><span class="info-label">Git</span><span class="info-val" id="sbGit">—</span></div>
       <div class="info-row"><span class="info-label">Python</span><span class="info-val" id="sbPython">—</span></div>
     </div>
@@ -516,20 +516,42 @@ select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%
     <!-- ═══ SYSTEM PAGE ═══════════════════════════════════════ -->
     <div class="page" id="systemPage">
       <div class="page-inner">
-        <div class="card"><h2>Runtime</h2><p class="subtitle">Node.js and platform details</p>
+        <!-- Runtime -->
+        <div class="card"><h2>Runtime</h2><p class="subtitle">Platform details</p>
           <div class="sys-grid">
-            <div class="sys-item"><div class="sys-label">Node.js</div><div class="sys-val" id="sysNode">—</div></div>
             <div class="sys-item"><div class="sys-label">Platform</div><div class="sys-val" id="sysPlatform">—</div></div>
             <div class="sys-item"><div class="sys-label">Architecture</div><div class="sys-val" id="sysArch">—</div></div>
-            <div class="sys-item"><div class="sys-label">Engine</div><div class="sys-val" id="sysEngine">—</div></div>
           </div>
         </div>
+
+        <!-- Provider -->
+        <div class="card" id="cardProvider"><h2>Provider</h2><p class="subtitle">Current AI provider configuration</p>
+          <div class="sys-grid">
+            <div class="sys-item"><div class="sys-label">Provider</div><div class="sys-val" id="sysProviderName">—</div></div>
+            <div class="sys-item"><div class="sys-label">Base URL</div><div class="sys-val" id="sysProviderURL">—</div></div>
+            <div class="sys-item"><div class="sys-label">Model</div><div class="sys-val" id="sysProviderModel">—</div></div>
+          </div>
+        </div>
+
+        <!-- System Memory -->
+        <div class="card" id="cardMemory"><h2>System Memory</h2><p class="subtitle">RAM usage and CPU load</p>
+          <div class="sys-grid">
+            <div class="sys-item"><div class="sys-label">Total</div><div class="sys-val" id="sysMemTotal">—</div></div>
+            <div class="sys-item"><div class="sys-label">Used</div><div class="sys-val" id="sysMemUsed">—</div></div>
+            <div class="sys-item"><div class="sys-label">Free</div><div class="sys-val" id="sysMemFree">—</div></div>
+            <div class="sys-item"><div class="sys-label">CPU Load</div><div class="sys-val" id="sysCpuLoad">—</div></div>
+          </div>
+        </div>
+
+        <!-- Developer Tools -->
         <div class="card"><h2>Developer Tools</h2><p class="subtitle">Available for AI use</p>
           <div class="sys-grid">
             <div class="sys-item"><div class="sys-label">Git</div><div class="sys-val" id="sysGit">—</div></div>
             <div class="sys-item"><div class="sys-label">Python</div><div class="sys-val" id="sysPython">—</div></div>
           </div>
         </div>
+
+        <!-- Ollama -->
         <div class="card" id="cardOllama" style="display:none"><h2>Local AI (Ollama)</h2><p class="subtitle">Manage portable Ollama engine</p>
           <div class="sys-grid">
             <div class="sys-item"><div class="sys-label">Status</div><div class="sys-val" id="sysOllamaStatus">—</div></div>
@@ -537,10 +559,14 @@ select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%
           </div>
           <div id="sysOllamaModels" style="margin-top:14px;font-size:0.82rem;color:var(--text2);line-height:1.6"></div>
         </div>
+
+        <!-- Storage -->
         <div class="card"><h2>Storage</h2><p class="subtitle">Drive usage</p>
           <div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:3px"><span id="diskUsed">—</span><span id="diskTotal">—</span></div>
           <div class="progress-bar"><div class="progress-fill" id="diskBar" style="width:0%"></div></div>
         </div>
+
+        <!-- Logs -->
         <div class="card"><h2>Session Logs</h2><p class="subtitle">Files in data directory</p>
           <div class="log-list" id="logList"><div style="padding:16px;text-align:center;color:var(--text2);font-size:0.82rem">Loading...</div></div>
           <div class="log-viewer" id="logViewer" style="display:none"></div>
@@ -626,11 +652,11 @@ const providerNames = { openrouter:'OpenRouter', gemini:'Gemini', anthropic:'Cla
   loadWorkDir();
   const savedAgent = localStorage.getItem('agentMode');
   if (savedAgent === 'true') { agentMode = true; document.getElementById('agentToggle').checked = true; document.getElementById('workdirBar').style.display = 'flex'; }
-  // Restore last active chat on refresh
   const lastChatId = localStorage.getItem('activeChatId');
   if (lastChatId) { try { await openChatById(lastChatId); } catch {} }
 })();
 
+// ─── loadConfig ─────────────────────────────────────────────
 async function loadConfig() {
   try {
     const res = await fetch(`${API}/api/config`);
@@ -646,8 +672,19 @@ async function loadConfig() {
                   cfg.AI_PROVIDER === 'ollama' ? 'Local AI' :
                   providerNames[cfg.AI_PROVIDER] || cfg.AI_PROVIDER || '—';
     const model = cfg.AI_DISPLAY_MODEL || cfg.OPENAI_MODEL || '—';
+    let providerURL = '—';
+    if (cfg.OPENAI_BASE_URL) {
+      providerURL = cfg.OPENAI_BASE_URL;
+    } else if (cfg.AI_PROVIDER === 'gemini') {
+      providerURL = 'https://generativelanguage.googleapis.com';
+    } else if (cfg.AI_PROVIDER === 'anthropic') {
+      providerURL = 'https://api.anthropic.com';
+    } else if (cfg.AI_PROVIDER === 'ollama') {
+      providerURL = 'http://localhost:11434/v1';
+    }
 
     document.getElementById('sbProvider').textContent = pName;
+    document.getElementById('sbProviderURL').textContent = providerURL;
     document.getElementById('sbModel').textContent = model;
     document.getElementById('topbarTitle').textContent = isConfigured ? `${model}` : 'Portable AI';
   } catch {}
@@ -658,7 +695,6 @@ async function loadSidebarInfo() {
   try {
     const res = await fetch(`${API}/api/system`);
     const d = await res.json();
-    document.getElementById('sbEngine').textContent = d.engineVersion || '—';
     document.getElementById('sbGit').innerHTML = d.hasGit ? '<span class="info-badge badge-ok">✓</span>' : '<span class="info-badge badge-err">✗</span>';
     document.getElementById('sbPython').innerHTML = d.hasPython ? '<span class="info-badge badge-ok">✓</span>' : '<span class="info-badge badge-err">✗</span>';
   } catch {}
@@ -688,12 +724,10 @@ const pages = { chat:'chatPage', setup:'setupPage', system:'systemPage', actions
 const tabs = { chat:'tabChat', setup:'tabSetup', system:'tabSystem', actions:'tabActions', updates:'tabUpdates' };
 
 function switchPage(name) {
-  // Hide all
   document.getElementById('chatPage').classList.remove('visible');
   Object.values(pages).forEach(id => { const p = document.getElementById(id); if (p) p.classList.remove('visible'); });
   Object.values(tabs).forEach(id => { const t = document.getElementById(id); if (t) t.classList.remove('active'); });
 
-  // Show target
   if (name === 'chat') {
     document.getElementById('chatPage').classList.add('visible');
   } else {
@@ -739,7 +773,6 @@ async function openChatById(id) {
     chatMessages = chat.messages || [];
     renderMessages(chatMessages);
     document.getElementById('topbarTitle').textContent = chat.title;
-    // Hide mode toggle for existing chats
     if (chatMessages.length > 0) { modeLocked = true; document.getElementById('modeToggle').style.display = 'none'; }
     else { resetMode(); }
     loadChatList();
@@ -757,7 +790,7 @@ function confirmDeleteChat(e, id, title) {
 }
 
 async function executeDelete() {
-  const id = _pendingDeleteId;  // Save BEFORE closeModal() clears it
+  const id = _pendingDeleteId;
   closeModal();
   if (!id) return;
   try {
@@ -881,7 +914,6 @@ async function sendMessage() {
   appendMessage({ role: 'user', content: text });
   scrollToBottom();
 
-  // Save user message immediately so it persists even if AI response fails
   if (currentChatId) {
     try {
       const existing = await fetch(`${API}/api/chats/${currentChatId}`).then(r => r.json());
@@ -1033,12 +1065,10 @@ async function sendAgentMessage(text, typingEl) {
               </div></div>`;
               document.getElementById('messages').appendChild(thinkingEl);
             }
-            // Append reasoning content
             if (thinkingContent) thinkingContent += '\n\n--- Step ' + thinkingCount + ' ---\n';
             thinkingContent += data.content;
             const bodyEl = document.getElementById('thinkBody');
             if (bodyEl) bodyEl.textContent = thinkingContent;
-            // Auto-open if first reasoning
             const arrow = document.getElementById('thinkArrow');
             const body = document.getElementById('thinkBody');
             if (arrow && body && !body.classList.contains('open')) {
@@ -1049,7 +1079,6 @@ async function sendAgentMessage(text, typingEl) {
             if (stepEl) stepEl.textContent = `Step ${thinkingCount}`;
             scrollToBottom();
           } else if (data.type === 'tool_call') {
-            // Update thinking card to show it's acting
             if (thinkingEl) {
               const label = thinkingEl.querySelector('.thinking-label');
               if (label) label.textContent = `Thinking → Acting`;
@@ -1075,13 +1104,11 @@ async function sendAgentMessage(text, typingEl) {
               if (ab) ab.remove();
             }
           } else if (data.type === 'agent_text') {
-            // Finalize thinking card
             if (thinkingEl) {
               const pulse = thinkingEl.querySelector('.thinking-pulse');
               const label = thinkingEl.querySelector('.thinking-label');
               if (pulse) pulse.classList.add('done');
               if (label) label.textContent = `Thought for ${thinkingCount} step${thinkingCount>1?'s':''}`;
-              // Collapse thinking
               const arrow = document.getElementById('thinkArrow');
               const body = document.getElementById('thinkBody');
               if (arrow && body) { body.classList.remove('open'); arrow.classList.remove('open'); }
@@ -1092,12 +1119,11 @@ async function sendAgentMessage(text, typingEl) {
             scrollToBottom();
           } else if (data.type === 'agent_error') {
             if (thinkingEl) thinkingEl.remove();
-            const errMsg = `⚠️ Agent Error: ${data.error}`;
+            const errMsg = `⚠️ Agent Error: ${data.error || 'Unknown error'}`;
             appendMessage({ role: 'assistant', content: errMsg });
             chatMessages.push({ role: 'assistant', content: errMsg });
             loadChatList();
           } else if (data.type === 'done') {
-            // Finalize thinking
             if (thinkingEl) {
               const pulse = thinkingEl.querySelector('.thinking-pulse');
               const label = thinkingEl.querySelector('.thinking-label');
@@ -1177,7 +1203,6 @@ function updateToolCardResult(card, data) {
     status.className = 'tool-status rejected';
     status.textContent = 'Failed';
   }
-  // Update body with result
   let resultText = '';
   if (data.name === 'write_file') resultText = data.result?.message || 'File written';
   else if (data.name === 'read_file') resultText = data.result?.content?.slice(0,3000) || data.result?.error || '';
@@ -1254,31 +1279,21 @@ function renderMarkdown(text) {
   if (!text) return '';
   let html = escHtml(text);
 
-  // Code blocks
   html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
     `<pre><code>${code.trim()}</code></pre>`);
-  // Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Headers
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  // Bold / italic
   html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // Blockquote
   html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-  // HR
   html = html.replace(/^---$/gm, '<hr>');
-  // Unordered list
   html = html.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
   html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
-  // Ordered list
   html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-  // Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  // Paragraphs
   html = html.split(/\n\n+/).map(block => {
     if (block.match(/^<(h[1-6]|ul|ol|blockquote|pre|hr)/)) return block;
     return `<p>${block.replace(/\n/g, '<br>')}</p>`;
@@ -1385,7 +1400,7 @@ async function initModelStep(){
   document.getElementById('tierToggle').style.display=isOR?'':'none';
   document.getElementById('modelSearchWrap').style.display=(isOR||isOllama||isNvidia||isDeepSeek||isOpenAICompat)?'':'none';
   document.getElementById('modelSearch').style.display=isOllama?'none':'';
-  document.getElementById('manualModelWrap').style.display=''; // Always show custom input
+  document.getElementById('manualModelWrap').style.display='';
   if(isOR) fetchModels(setupState.tier);
   else if(isOllama) await fetchOllamaModels();
   else if(isNvidia) await fetchNvidiaModels();
@@ -1425,7 +1440,6 @@ async function fetchNvidiaModels() {
     const res=await fetch(`${API}/api/nvidia/models`);
     const d=await res.json();
     const liveModels=d.models||[];
-    // Prepend curated, remove duplicates
     allModels=[...new Set([...curated, ...liveModels])];
     renderModels(allModels);
   }catch{
@@ -1521,31 +1535,63 @@ async function saveConfig(){
 }
 
 // ─── System Info ─────────────────────────────────────────────
-async function loadSystemInfo(){
+async function loadSystemInfo() {
   try{
     const res=await fetch(`${API}/api/system`);
     const d=await res.json();
-    document.getElementById('sysNode').textContent=d.nodeVersion||'—';
+    // Runtime
     document.getElementById('sysPlatform').textContent=d.platform||'—';
     document.getElementById('sysArch').textContent=d.arch||'—';
-    document.getElementById('sysEngine').textContent=d.engineVersion||'Not installed';
+
+    // Provider
+    const pName = cfg.AI_PROVIDER ? (providerNames[cfg.AI_PROVIDER] || cfg.AI_PROVIDER) : '—';
+    let pURL = '—';
+    if (cfg.OPENAI_BASE_URL) pURL = cfg.OPENAI_BASE_URL;
+    else if (cfg.AI_PROVIDER === 'gemini') pURL = 'https://generativelanguage.googleapis.com';
+    else if (cfg.AI_PROVIDER === 'anthropic') pURL = 'https://api.anthropic.com';
+    else if (cfg.AI_PROVIDER === 'ollama') pURL = 'http://localhost:11434/v1';
+    const pModel = cfg.AI_DISPLAY_MODEL || cfg.OPENAI_MODEL || '—';
+    document.getElementById('sysProviderName').textContent = pName;
+    document.getElementById('sysProviderURL').textContent = pURL;
+    document.getElementById('sysProviderModel').textContent = pModel;
+
+    // Memory & CPU
+    if (d.memoryTotal !== undefined && d.memoryTotal !== null) {
+      const formatBytes = (bytes) => {
+        if (bytes === undefined || bytes === null) return '—';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+        return (bytes / 1073741824).toFixed(2) + ' GB';
+      };
+      document.getElementById('sysMemTotal').textContent = formatBytes(d.memoryTotal);
+      document.getElementById('sysMemUsed').textContent = formatBytes(d.memoryUsed);
+      document.getElementById('sysMemFree').textContent = formatBytes(d.memoryTotal - d.memoryUsed);
+      document.getElementById('sysCpuLoad').textContent = (d.cpuLoad !== undefined && d.cpuLoad !== null) ? d.cpuLoad.toFixed(1) + '%' : '—';
+    } else {
+      document.getElementById('sysMemTotal').textContent = '—';
+      document.getElementById('sysMemUsed').textContent = '—';
+      document.getElementById('sysMemFree').textContent = '—';
+      document.getElementById('sysCpuLoad').textContent = '—';
+    }
+
+    // Developer Tools
     document.getElementById('sysGit').innerHTML=d.hasGit?`<span class="badge badge-success">${d.portableGit?'USB':'System'}</span>`:'<span class="badge badge-error">Not found</span>';
     document.getElementById('sysPython').innerHTML=d.hasPython?`<span class="badge badge-success">${d.portablePython?'USB':'System'}</span>`:'<span class="badge badge-error">Not found</span>';
 
+    // Ollama
     if (d.ollamaInstalled) {
        document.getElementById('cardOllama').style.display='block';
        try {
          const oRes = await fetch(`${API}/api/ollama/status`);
          const oData = await oRes.json();
          document.getElementById('sysOllamaStatus').innerHTML = oData.running ? '<span class="badge badge-success">Running</span>' : '<span class="badge badge-error">Stopped</span>';
-
          const actionsEl = document.getElementById('sysOllamaActions');
          if (oData.running) {
              actionsEl.innerHTML = `<button class="btn btn-outline" style="padding:5px 12px;font-size:0.75rem" onclick="toggleOllama('stop')">Stop</button>`;
          } else {
              actionsEl.innerHTML = `<button class="btn btn-primary" style="padding:5px 12px;font-size:0.75rem" onclick="toggleOllama('start')">Start</button>`;
          }
-
          const mRes = await fetch(`${API}/api/ollama/models`);
          const mData = await mRes.json();
          if(mData.models && mData.models.length>0) {
@@ -1558,12 +1604,14 @@ async function loadSystemInfo(){
        document.getElementById('cardOllama').style.display='none';
     }
 
+    // Storage
     if(d.diskTotal){
       const used=d.diskTotal-d.diskFree;
       document.getElementById('diskUsed').textContent=`Used: ${(used/1073741824).toFixed(1)} GB`;
       document.getElementById('diskTotal').textContent=`Total: ${(d.diskTotal/1073741824).toFixed(1)} GB`;
       document.getElementById('diskBar').style.width=((used/d.diskTotal)*100).toFixed(1)+'%';
     }
+    // Logs
     loadLogs();
   }catch{showToast('Failed to load system info','error');}
 }

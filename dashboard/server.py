@@ -27,6 +27,12 @@ except ImportError:
     print("Please install aiohttp: pip install aiohttp")
     sys.exit(1)
 
+# Попытка импортировать psutil для информации о памяти/CPU
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 # ========== Constants ==========
 
 __file__ = os.path.abspath(__file__)
@@ -137,22 +143,21 @@ def new_chat_id() -> str:
 
 def get_system_info() -> Dict:
     info = {
-        'nodeVersion': sys.version,  # not node, but okay
         'platform': sys.platform,
         'arch': ARCH,
         'hasGit': shutil.which('git') is not None,
         'hasPython': shutil.which('python') is not None or shutil.which('python3') is not None,
         'portableGit': IS_WIN and os.path.exists(os.path.join(BIN_DIR, 'git', 'cmd', 'git.exe')),
         'portablePython': IS_WIN and os.path.exists(os.path.join(BIN_DIR, 'python', 'python.exe')),
-        'engineVersion': None,  # not applicable
         'ollamaInstalled': os.path.exists(os.path.join(DATA_DIR, 'ollama', 'ollama.exe')) or
                            os.path.exists(os.path.join(DATA_DIR, 'ollama', 'ollama')),
         'diskFree': 0,
         'diskTotal': 0
     }
+    # Дисковое пространство
     try:
         if IS_WIN:
-            # Not implemented for simplicity
+            # Простейший fallback – можно пропустить
             pass
         else:
             output = subprocess.check_output(['df', '-k', ROOT_DIR], encoding='utf-8')
@@ -164,14 +169,84 @@ def get_system_info() -> Dict:
                     info['diskFree'] = int(parts[3]) * 1024
     except:
         pass
+
+    # Получение информации о памяти и CPU
+    memory_info = {}
+    cpu_load = None
+    if psutil:
+        mem = psutil.virtual_memory()
+        memory_info = {
+            'total': mem.total,
+            'available': mem.available,
+            'used': mem.used,
+            'percent': mem.percent
+        }
+        cpu_load = psutil.cpu_percent(interval=0.1)
+    else:
+        # Fallback для Linux
+        if sys.platform.startswith('linux'):
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    lines = f.readlines()
+                    mem_total = None
+                    mem_available = None
+                    for line in lines:
+                        if line.startswith('MemTotal:'):
+                            mem_total = int(line.split()[1]) * 1024  # kB -> bytes
+                        elif line.startswith('MemAvailable:'):
+                            mem_available = int(line.split()[1]) * 1024
+                    if mem_total and mem_available:
+                        memory_info = {
+                            'total': mem_total,
+                            'available': mem_available,
+                            'used': mem_total - mem_available,
+                            'percent': (1 - mem_available/mem_total) * 100
+                        }
+            except:
+                pass
+        elif sys.platform == 'win32':
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+                memoryStatus = MEMORYSTATUSEX()
+                memoryStatus.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if kernel32.GlobalMemoryStatusEx(ctypes.byref(memoryStatus)):
+                    memory_info = {
+                        'total': memoryStatus.ullTotalPhys,
+                        'available': memoryStatus.ullAvailPhys,
+                        'used': memoryStatus.ullTotalPhys - memoryStatus.ullAvailPhys,
+                        'percent': 100 - (memoryStatus.ullAvailPhys / memoryStatus.ullTotalPhys * 100)
+                    }
+            except:
+                pass
+        # CPU load fallback – оставляем None
+
+    info['memoryTotal'] = memory_info.get('total')
+    info['memoryAvailable'] = memory_info.get('available')
+    info['memoryUsed'] = memory_info.get('used')
+    info['memoryPercent'] = memory_info.get('percent')
+    info['cpuLoad'] = cpu_load
+
     return info
 
 
 def get_session_logs() -> List[Dict]:
-    logs_dir = os.path.join(ROOT_DIR, '.app_data')  # trash dir excluded of git history
+    logs_dir = os.path.join(DATA_DIR, 'app_data')
     logs = []
     if not os.path.exists(logs_dir):
-        os.makedirs(logs_dir, exist_ok=True) #add creation dir of logs
+        os.makedirs(logs_dir, exist_ok=True)
 
     def walk_dir(directory, depth=0):
         if depth > 3:
@@ -205,7 +280,7 @@ def get_session_logs() -> List[Dict]:
 TOOL_DEFS = [
     {
         'name': 'write_file',
-        'description': 'Create or overwrite a file with the given content. Creates parent directories automatically.',
+        'description': 'Create or overwrite a file with the given content. Creates parent directories automatically. Max size: 10 MB. For larger files, use append_file or write_file_chunk.',
         'parameters': {
             'type': 'object',
             'properties': {
@@ -217,13 +292,38 @@ TOOL_DEFS = [
     },
     {
         'name': 'read_file',
-        'description': 'Read the contents of a file.',
+        'description': 'Read the contents of a file. Max size: 512 KB. For larger files, use execute_command with head/tail/grep or request chunked reading.',
         'parameters': {
             'type': 'object',
             'properties': {
                 'path': {'type': 'string', 'description': 'File path relative to the working directory'}
             },
             'required': ['path']
+        }
+    },
+    {
+        'name': 'append_file',
+        'description': 'Append text content to the end of a file. Creates the file if it does not exist. Useful for building large files incrementally.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'path': {'type': 'string', 'description': 'File path relative to the working directory'},
+                'content': {'type': 'string', 'description': 'Text content to append to the file'}
+            },
+            'required': ['path', 'content']
+        }
+    },
+    {
+        'name': 'write_file_chunk',
+        'description': 'Write content to a file at a specific byte offset (overwrites from that position). Useful for writing large files in parts. If offset is beyond the current file size, the file is extended with null bytes.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'path': {'type': 'string', 'description': 'File path relative to the working directory'},
+                'content': {'type': 'string', 'description': 'Text content to write'},
+                'offset': {'type': 'integer', 'description': 'Byte offset to start writing at (0 = beginning of file). If file is shorter, it will be extended.'}
+            },
+            'required': ['path', 'content', 'offset']
         }
     },
     {
@@ -262,7 +362,7 @@ TOOL_DEFS = [
     }
 ]
 
-WRITE_TOOLS = {'write_file', 'execute_command'}
+WRITE_TOOLS = {'write_file', 'append_file', 'write_file_chunk', 'execute_command'}
 
 
 def tools_for_openai():
@@ -309,7 +409,6 @@ def tools_for_gemini():
 
 def resolve_path(rel_path: str) -> str:
     global WORK_DIR
-    # Нормализуем путь (преобразуем / в \ на Windows, убираем лишние разделители)
     if os.path.isabs(rel_path):
         return os.path.realpath(os.path.normpath(rel_path))
     return os.path.realpath(os.path.normpath(os.path.join(WORK_DIR, rel_path)))
@@ -320,18 +419,59 @@ def execute_tool_sync(name: str, args: Dict) -> Dict:
     try:
         if name == 'write_file':
             full_path = resolve_path(args['path'])
+            content = args['content']
+            MAX_WRITE_SIZE = 10 * 1024 * 1024  # 10 MB
+            if len(content) > MAX_WRITE_SIZE:
+                return {
+                    'success': False,
+                    'error': f"Content too large ({len(content)} bytes). Use append_file or write_file_chunk for large data."
+                }
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(args['content'])
-            return {'success': True, 'message': f"File written: {args['path']} ({len(args['content'])} chars)"}
+                f.write(content)
+            return {'success': True, 'message': f"File written: {args['path']} ({len(content)} chars)"}
 
         elif name == 'read_file':
             full_path = resolve_path(args['path'])
             if not os.path.exists(full_path):
                 return {'success': False, 'error': f"File not found: {args['path']}"}
+            file_size = os.path.getsize(full_path)
+            MAX_READ_SIZE = 512 * 1024  # 512 KB
+            if file_size > MAX_READ_SIZE:
+                return {
+                    'success': False,
+                    'error': f"File too large ({file_size} bytes). Use execute_command with head/tail/grep or request chunked reading (append_file/write_file_chunk).",
+                    'size': file_size,
+                    'max_allowed': MAX_READ_SIZE
+                }
             with open(full_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             return {'success': True, 'content': content, 'size': len(content)}
+
+        elif name == 'append_file':
+            full_path = resolve_path(args['path'])
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, 'a', encoding='utf-8') as f:
+                f.write(args['content'])
+            return {'success': True, 'message': f"Appended {len(args['content'])} chars to: {args['path']}"}
+
+        elif name == 'write_file_chunk':
+            full_path = resolve_path(args['path'])
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            offset = args.get('offset', 0)
+            content = args['content']
+            if os.path.exists(full_path):
+                current_size = os.path.getsize(full_path)
+                if offset > current_size:
+                    with open(full_path, 'ab') as f:
+                        f.write(b'\x00' * (offset - current_size))
+            else:
+                with open(full_path, 'wb') as f:
+                    f.write(b'\x00' * offset)
+            with open(full_path, 'r+b') as f:
+                f.seek(offset)
+                f.write(content.encode('utf-8'))
+            return {'success': True, 'message': f"Written {len(content)} chars at offset {offset} to: {args['path']}"}
 
         elif name == 'list_directory':
             path = args.get('path', '.')
@@ -464,7 +604,6 @@ async def call_ai_anthropic(messages: List[Dict], cfg: Dict, include_tools: bool
     if not api_key:
         raise ValueError('ANTHROPIC_API_KEY missing')
 
-    # Extract system message
     system = ''
     filtered = []
     for m in messages:
@@ -698,17 +837,13 @@ async def run_agent(all_messages, cfg, mode, send_sse):
     max_iterations = 15
     final_text = ''
 
-    # Добавляем завершающий разделитель к WORK_DIR для ясности
     work_dir_display = os.path.join(WORK_DIR, '')
     system_prompts = {
-        'normal': f'You are a powerful AI coding agent running in a web dashboard. You have access to tools to create files, read files, list directories, execute shell commands, and search files. The current working directory is: {work_dir_display}. Before executing write operations, briefly explain what you are about to do. Use tools to actually perform actions - do not just describe what to do.',
-        'limitless': f'You are an autonomous AI coding agent running in Limitless mode. You have access to tools to create files, read files, list directories, execute shell commands, and search files. The current working directory is: {work_dir_display}. Execute tasks directly and completely without asking for confirmation. Use tools to actually perform actions. Be decisive and thorough.'
+        'normal': f'You are a powerful AI coding agent running in a web dashboard. You have access to tools: write_file (max 10MB), append_file (append), write_file_chunk (write at offset), read_file (max 512KB), list_directory, execute_command, search_files. The current working directory is: {work_dir_display}. Before executing write operations, briefly explain what you are about to do. Use tools to actually perform actions - do not just describe what to do.',
+        'limitless': f'You are an autonomous AI coding agent running in Limitless mode. You have access to tools: write_file (max 10MB), append_file, write_file_chunk, read_file (max 512KB), list_directory, execute_command, search_files. The current working directory is: {work_dir_display}. Execute tasks directly and completely without asking for confirmation. Use tools to actually perform actions. Be decisive and thorough.'
     }
 
-    # Удаляем все старые системные сообщения из истории
     all_messages[:] = [msg for msg in all_messages if msg.get('role') != 'system']
-
-    # Вставляем актуальное системное сообщение в начало
     sys_content = system_prompts.get(mode, system_prompts['normal'])
     all_messages.insert(0, {'role': 'system', 'content': sys_content})
 
@@ -736,23 +871,19 @@ async def run_agent(all_messages, cfg, mode, send_sse):
             content = ai_response['content'].strip()
             json_str = None
 
-            # 1. Ищем JSON внутри <tools>...</tools>
             tools_match = re.search(r'<tools>\s*([\s\S]*?)\s*</tools>', content)
             if tools_match:
                 json_str = tools_match.group(1).strip()
             else:
-                # 2. Ищем Markdown-блок ```json ... ```
                 md_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', content)
                 if md_match:
                     json_str = md_match.group(1).strip()
                 else:
-                    # 3. Пробуем весь контент как JSON
                     json_str = content
 
             if json_str:
                 try:
                     parsed = json.loads(json_str)
-                    # Если это список, берем первый элемент
                     if isinstance(parsed, list):
                         if parsed:
                             parsed = parsed[0]
@@ -765,7 +896,7 @@ async def run_agent(all_messages, cfg, mode, send_sse):
                             'args': parsed['arguments']
                         }
                         ai_response['tool_calls'] = [tool_call]
-                        ai_response['content'] = ''  # очищаем, чтобы не дублировать
+                        ai_response['content'] = ''
                         await send_sse({'type': 'agent_reasoning', 'content': f'⏳ Executing tool: {parsed["name"]}', 'iteration': iteration + 1})
                 except (json.JSONDecodeError, KeyError, IndexError):
                     pass
@@ -925,7 +1056,6 @@ async def stream_chat_response(messages: List[Dict], cfg: Dict, send_sse: callab
 # ========== HTTP Server Handlers (aiohttp) ==========
 
 async def handle_index(request: Request):
-    # Пытаемся найти index.html или index.htm
     possible_paths = [
         os.path.join(__dirname, 'index.html'),
         os.path.join(__dirname, 'index.htm')
@@ -939,7 +1069,6 @@ async def handle_index(request: Request):
             except Exception as e:
                 print(f"Error reading {path}: {e}")
                 continue
-    # Если ни один файл не найден – отдаём сообщение
     return web.Response(
         text="<h1>404 Not Found</h1><p>index.html not found in server directory.</p>",
         status=404,
@@ -1326,7 +1455,6 @@ async def handle_agent(request: Request):
 
     try:
         full_text = await run_agent(all_messages, cfg, mode, send_sse)
-        # Save to chat history
         if chat_id and full_text:
             existing = load_chat(chat_id) or {
                 'id': chat_id,
@@ -1392,17 +1520,14 @@ async def handle_chat(request: Request):
         await response.write_eof()
         return response
 
-    # Используем завершающий слеш для ясности
     work_dir_display = os.path.join(WORK_DIR, '')
     system_prompts = {
-        'normal': f'You are a helpful, precise AI assistant. The current working directory is: {work_dir_display}. Before executing any significant action, briefly explain what you are about to do.',
-        'limitless': f'You are an autonomous AI assistant in Limitless mode. The current working directory is: {work_dir_display}. Execute tasks directly and completely without asking for confirmation. Be decisive and thorough. Do not ask clarifying questions — make reasonable assumptions and proceed immediately with full results.'
+        'normal': f'You are a helpful, precise AI assistant. The current working directory is: {work_dir_display}. You have tools: write_file (max 10MB), append_file, write_file_chunk, read_file (max 512KB), list_directory, execute_command, search_files. Before executing any significant action, briefly explain what you are about to do.',
+        'limitless': f'You are an autonomous AI assistant in Limitless mode. The current working directory is: {work_dir_display}. You have tools: write_file, append_file, write_file_chunk, read_file, list_directory, execute_command, search_files. Execute tasks directly and completely without asking for confirmation. Be decisive and thorough. Do not ask clarifying questions — make reasonable assumptions and proceed immediately with full results.'
     }
     sys_content = system_prompts.get(mode, system_prompts['normal'])
     history = messages.copy()
-    # Удаляем все старые системные сообщения из истории
     history = [msg for msg in history if msg.get('role') != 'system']
-    # Формируем сообщения: новое системное + история + текущее сообщение пользователя
     all_messages = [{'role': 'system', 'content': sys_content}] + history + [{'role': 'user', 'content': user_message}]
 
     full_text = ''
@@ -1411,12 +1536,10 @@ async def handle_chat(request: Request):
     except Exception as e:
         await send_sse({'type': 'error', 'content': str(e)})
     finally:
-        # Отправляем финальное событие done, если его не отправила stream_chat_response
         if full_text:
             await send_sse({'type': 'done', 'fullText': full_text})
         await response.write_eof()
 
-    # Сохраняем историю, если есть full_text
     if chat_id and full_text:
         existing = load_chat(chat_id) or {
             'id': chat_id,
