@@ -1,5 +1,6 @@
 """
-Configuration routes — read / write / export / import ai_settings.env.
+Configuration routes — read / write / export / import ai_settings.env,
+plus named profile management.
 """
 
 import os
@@ -7,7 +8,10 @@ import os
 from aiohttp import web
 from aiohttp.web import Request
 
-from ..config import read_config, write_config
+from ..config import (
+    read_config, write_config,
+    list_profiles, save_profile, load_profile, delete_profile,
+)
 from ..constants import ENV_FILE, HTML_FILE, SERVER_DIR
 
 
@@ -63,8 +67,69 @@ async def _config_import(req: Request) -> web.Response:
     return web.json_response({'success': True})
 
 
+# ── Profile endpoints ─────────────────────────────────────────────────
+
+async def _profiles_list(_req: Request) -> web.Response:
+    """GET /api/profiles — list all saved profiles."""
+    return web.json_response({'profiles': list_profiles()})
+
+
+async def _profiles_save(req: Request) -> web.Response:
+    """POST /api/profiles/save — save current (or provided) config as profile."""
+    data = await req.json()
+    name = (data.get('name') or '').strip()
+    config = data.get('config') or read_config()
+    if not name:
+        return web.json_response({'success': False, 'error': 'Name is required'}, status=400)
+    save_profile(name, config)
+    return web.json_response({'success': True})
+
+
+async def _profiles_load(req: Request) -> web.Response:
+    """POST /api/profiles/load — load a saved profile (apply to current config)."""
+    data = await req.json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return web.json_response({'success': False, 'error': 'Name is required'}, status=400)
+    config = load_profile(name)
+    if config is None:
+        return web.json_response({'success': False, 'error': 'Profile not found'}, status=404)
+    # Apply it immediately
+    write_config(config)
+    return web.json_response({'success': True, 'config': config})
+
+
+async def _profiles_delete(req: Request) -> web.Response:
+    """POST /api/profiles/delete — delete a saved profile."""
+    data = await req.json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return web.json_response({'success': False, 'error': 'Name is required'}, status=400)
+    ok = delete_profile(name)
+    if not ok:
+        return web.json_response({'success': False, 'error': 'Profile not found'}, status=404)
+    return web.json_response({'success': True})
+
+
+async def _profiles_view(req: Request) -> web.Response:
+    """POST /api/profiles/view — peek at a saved profile config without applying."""
+    data = await req.json()
+    name = (data.get('name') or '').strip()
+    config = load_profile(name)
+    if config is None:
+        return web.json_response({'success': False, 'error': 'Profile not found'}, status=404)
+    return web.json_response({'success': True, 'config': config})
+
+
 def register(app: web.Application) -> None:
     app.router.add_get('/api/config', _config_get)
     app.router.add_post('/api/config', _config_post)
     app.router.add_get('/api/config/export', _config_export)
     app.router.add_post('/api/config/import', _config_import)
+
+    # Profiles
+    app.router.add_get('/api/profiles', _profiles_list)
+    app.router.add_post('/api/profiles/save', _profiles_save)
+    app.router.add_post('/api/profiles/load', _profiles_load)
+    app.router.add_post('/api/profiles/delete', _profiles_delete)
+    app.router.add_post('/api/profiles/view', _profiles_view)

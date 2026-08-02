@@ -3,6 +3,7 @@
 Lib/
 Scripts/
 data/chats/
+data/profiles/
 data/ai_settings.env
 OpenClaudeWinDDK.cmd
 OpenClaudeWinSDK.cmd
