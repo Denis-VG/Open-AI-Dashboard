@@ -8,3 +8,4 @@ OpenClaudeWinDDK.cmd
 OpenClaudeWinSDK.cmd
 pyvenv.cfg
 CACHEDIR.TAG
+server_out.txt
