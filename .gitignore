@@ -1,12 +1,31 @@
-.app_data/
+# === Виртуальное окружение Python (Исправлено) ===
+# В Git важен регистр букв: стандартная папка пишется как __pycache__
+__pycache__/
 .pycache/
 Lib/
 Scripts/
-data/chats/
-data/profiles/
-data/ai_settings.env
-OpenClaudeWinDDK.cmd
-OpenClaudeWinSDK.cmd
 pyvenv.cfg
+
+# === Конфиденциальные данные и Кэш приложения ===
+.app_data/
 CACHEDIR.TAG
 server_out.txt
+
+# === Специфичные файлы настроек проекта ===
+# Файлы запуска (.cmd)
+OpenClaudeWinDDK.cmd
+OpenClaudeWinSDK.cmd
+
+# Переменные окружения (Обязательно прятать, там могут быть API-ключи!)
+data/ai_settings.env
+
+# === Пользовательские данные (Исправлено) ===
+# Правый слэш в конце указывает Git, что это папка. Так поиск работает быстрее.
+data/chats/
+data/profiles/
+
+# === Системные папки Git и AI (Исправлено) ===
+# Прямой слэш в начале блокирует только корневую папку.
+# Для .github это сработает, но папки .github и .AI обычно пишутся БЕЗ ведущего слэша.
+.github/
+.AI/
