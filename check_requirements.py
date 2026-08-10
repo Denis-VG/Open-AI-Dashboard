@@ -6,6 +6,7 @@
 
 Импорт:
     from check_requirements import check_requirements, PackageStatus
+    
 """
 
 from __future__ import annotations
