@@ -41,12 +41,17 @@ Required packages (see `requirements.txt`):
 - **Custom system prompt** — Setup tab: define your own agent rules (leave blank for defaults)
 - **Multiple AI providers** — OpenAI, Anthropic, Gemini, DeepSeek, Ollama, LM Studio, OpenRouter, NVIDIA NIM
 - **Configuration profiles** — save and switch between provider setups
+- **Token usage tracking** — per-chat bar: `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; global project stats in sidebar `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; global project stats in sidebar
+- **Prompt caching** — Anthropic (explicit cache control) & DeepSeek (native); cache hit % in token bar
+- **Project instructions** — Setup tab: append project-specific rules to system prompt (stored in `.ai/project_prompt.txt`)
+- **Inline reasoning cards** — agent thoughts appear right before each tool call, not stuck at the top; approval buttons always visible
+- **Agent status indicator** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec with elapsed timer
 
 ### ⚠️ Alpha Status
 
 **This is an early alpha release.** Please be aware that:
 
-- Not all features from the original project have been implemented yet
+- Core features preserved, new capabilities added
 - Bugs may still be present and not all edge cases have been tested
 - APIs and interfaces may change without notice
 - Use at your own risk in production environments
@@ -96,12 +101,17 @@ pip install -r requirements.txt
 - **Настраиваемый system prompt** — вкладка Setup: собственные инструкции для агента (пусто — используются стандартные)
 - **Множество AI-провайдеров** — OpenAI, Anthropic, Gemini, DeepSeek, Ollama, LM Studio, OpenRouter, NVIDIA NIM
 - **Профили конфигураций** — сохраняйте и переключайтесь между настройками провайдеров
+- **Учёт токенов** — строка внизу чата: `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; глобальная статистика по проекту в сайдбаре
+- **Кэширование промптов** — Anthropic (явное) и DeepSeek (авто); процент попаданий в кэш в токен-баре
+- **Инструкции проекта** — вкладка Setup: добавление правил проекта в system prompt (файл `.ai/project_prompt.txt`)
+- **Inline-карточки рассуждений** — мысли агента перед каждым действием, а не вверху; кнопки подтверждения всегда видны
+- **Индикатор статуса агента** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec с таймером
 
 ### ⚠️ Статус Альфа
 
 **Это ранняя альфа-версия.** Пожалуйста, учитывайте, что:
 
-- Не все функции оригинального проекта ещё реализованы
+- Основные функции сохранены, добавлены новые возможности
 - Могут присутствовать баги, и не все сценарии использования протестированы
 - API и интерфейсы могут изменяться без предупреждения
 - Использование в production-среде — на ваш страх и риск
