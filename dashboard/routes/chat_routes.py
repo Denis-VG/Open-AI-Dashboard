@@ -21,9 +21,10 @@ async def _list(req: Request) -> web.Response:
 async def _create(req: Request) -> web.Response:
     data = await req.json()
     title = data.get('title', 'New Conversation')
+    chat_mode = data.get('chat_mode', 'simple')
     store = _store(req)
     chat_id = store.new_id()
-    store.save(chat_id, store.init_chat(chat_id, title))
+    store.save(chat_id, store.init_chat(chat_id, title, chat_mode))
     return web.json_response({'id': chat_id})
 
 

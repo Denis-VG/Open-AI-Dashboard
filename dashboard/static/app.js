@@ -264,11 +264,15 @@ async function loadChatList() {
         }
         el.innerHTML = chats.map(function (c) {
             var activeClass = currentChatId === c.id ? ' active' : '';
+            var isAgent = c.chat_mode === 'agent';
             var title = escHtml(c.title);
+            var modeBadge = isAgent
+                ? ' <span class="chat-mode-badge agent-badge" title="Agent mode">\uD83E\uDD16</span>'
+                : ' <span class="chat-mode-badge simple-badge" title="Simple chat">\uD83D\uDCAC</span>';
             var meta = c.messageCount + ' msgs \u00b7 ' + relativeTime(c.updated);
             return '<div class="chat-item' + activeClass + '" data-action="openChat" data-id="' + c.id + '">'
                 + '<div style="min-width:0">'
-                + '<div class="chat-item-title">' + title + '</div>'
+                + '<div class="chat-item-title">' + title + modeBadge + '</div>'
                 + '<div class="chat-item-meta">' + meta + '</div>'
                 + '</div>'
                 + '<button class="chat-item-del" data-action="deleteChat" data-id="' + c.id + '" data-title="' + escHtml(c.title).replace(/"/g, '&quot;') + '">\u2715</button>'
@@ -289,6 +293,18 @@ async function openChatById(id) {
         chatMessages = chat.messages || [];
         renderMessages(chatMessages);
         document.getElementById('topbarTitle').textContent = chat.title;
+
+        // Restore agent mode from chat metadata
+        var isAgentChat = chat.chat_mode === 'agent';
+        agentMode = isAgentChat;
+        localStorage.setItem('agentMode', isAgentChat);
+        document.getElementById('agentToggle').checked = isAgentChat;
+        document.getElementById('workdirBar').style.display = isAgentChat ? 'flex' : 'none';
+        document.getElementById('chatInput').placeholder = isAgentChat
+            ? 'Ask agent to create files, run commands...'
+            : 'Message AI...';
+        if (isAgentChat) loadWorkDir();
+
         if (chatMessages.length > 0) {
             modeLocked = true;
             document.getElementById('modeToggle').style.display = 'none';
@@ -345,10 +361,11 @@ function closeModal() {
 
 async function startNewChat() {
     try {
+        var chatMode = agentMode ? 'agent' : 'simple';
         var res = await fetch(API + '/api/chats', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: 'New Conversation' })
+            body: JSON.stringify({ title: 'New Conversation', chat_mode: chatMode })
         });
         var data = await res.json();
         currentChatId = data.id;
@@ -389,7 +406,7 @@ function resetMode() {
     setMode('normal');
 }
 
-function toggleAgent(enabled) {
+async function toggleAgent(enabled) {
     agentMode = enabled;
     localStorage.setItem('agentMode', enabled);
     document.getElementById('workdirBar').style.display = enabled ? 'flex' : 'none';
@@ -397,6 +414,24 @@ function toggleAgent(enabled) {
         ? 'Ask agent to create files, run commands...'
         : 'Message AI...';
     if (enabled) loadWorkDir();
+
+    // Persist mode change to current chat and refresh sidebar badges
+    if (currentChatId) {
+        try {
+            var chat = await fetch(API + '/api/chats/' + currentChatId).then(function (r) { return r.json(); });
+            if (chat && !chat.error) {
+                chat.chat_mode = enabled ? 'agent' : 'simple';
+                await fetch(API + '/api/chats/' + currentChatId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chat)
+                });
+            }
+        } catch (e) {
+            console.error('toggleAgent save failed:', e);
+        }
+        loadChatList();
+    }
 }
 
 async function loadWorkDir() {

@@ -34,7 +34,8 @@ class ChatStore:
                     'title': data.get('title', 'Untitled'),
                     'created': data.get('created'),
                     'updated': data.get('updated'),
-                    'messageCount': len(data.get('messages', []))
+                    'messageCount': len(data.get('messages', [])),
+                    'chat_mode': data.get('chat_mode', 'simple')
                 })
             except Exception:
                 continue
@@ -71,11 +72,12 @@ class ChatStore:
 
     # ------------------------------------------------------------------
     @staticmethod
-    def init_chat(chat_id: str, title: str = 'New Conversation') -> dict:
+    def init_chat(chat_id: str, title: str = 'New Conversation', chat_mode: str = 'simple') -> dict:
         now = datetime.now().isoformat()
         return {
             'id': chat_id,
             'title': title,
+            'chat_mode': chat_mode,
             'created': now,
             'updated': now,
             'messages': []
