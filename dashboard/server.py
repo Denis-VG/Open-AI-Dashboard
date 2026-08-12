@@ -38,14 +38,15 @@ from dashboard.chat_store import ChatStore
 from dashboard.approval import ApprovalManager
 from dashboard.tools import ToolRegistry
 from dashboard.config import ensure_defaults
-from dashboard.constants import PORT, HOST, CHATS_DIR
+from dashboard.constants import PORT, HOST
 
 
 async def create_app(work_dir: str) -> web.Application:
     app = web.Application()
 
     # ── infrastructure singletons (DI via app dict) ───────────────────
-    app['chat_store'] = ChatStore(CHATS_DIR)
+    chats_dir = os.path.join(work_dir, '.ai', 'chats')
+    app['chat_store'] = ChatStore(chats_dir)
     app['approval'] = ApprovalManager()
     app['tool_registry'] = ToolRegistry(work_dir)
     app['work_dir'] = work_dir

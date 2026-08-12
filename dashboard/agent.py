@@ -33,7 +33,7 @@ _TOOL_UNSUPPORTED_MARKERS = (
     'does not support', 'invalid parameter', 'not allowed',
 )
 
-SYSTEM_PROMPTS = {
+_DEFAULT_SYSTEM_PROMPTS = {
     'normal': (
         'You are a powerful AI coding agent running in a web dashboard. '
         'You have access to tools: write_file (max 10MB), append_file (append), '
@@ -53,6 +53,24 @@ SYSTEM_PROMPTS = {
         'Use tools to actually perform actions. Be decisive and thorough.'
     ),
 }
+
+
+def get_system_prompt(mode: str, work_dir: str) -> str:
+    """Return the system prompt for the given mode.
+
+    Loads custom SYSTEM_PROMPT from config if set; falls back to built-in defaults.
+    """
+    from .config import read_config as _rc
+    cfg = _rc()
+    custom = cfg.get('SYSTEM_PROMPT', '').strip()
+
+    if custom:
+        return custom.format(work_dir=work_dir)
+
+    work_dir_display = os.path.join(work_dir, '')
+    return _DEFAULT_SYSTEM_PROMPTS.get(mode, _DEFAULT_SYSTEM_PROMPTS['normal']).format(
+        work_dir=work_dir_display
+    )
 
 
 class AgentLoop:
@@ -137,10 +155,7 @@ class AgentLoop:
     def _inject_system(self, messages: list[dict], mode: str) -> None:
         """Remove existing system messages and prepend the appropriate one."""
         messages[:] = [m for m in messages if m.get('role') != 'system']
-        work_dir_display = os.path.join(self._work_dir, '')
-        sys_content = SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS['normal']).format(
-            work_dir=work_dir_display
-        )
+        sys_content = get_system_prompt(mode, self._work_dir)
         messages.insert(0, {'role': 'system', 'content': sys_content})
 
     def _looks_like_tool_error(self, err: str) -> bool:

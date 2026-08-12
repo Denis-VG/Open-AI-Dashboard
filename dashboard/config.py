@@ -56,6 +56,10 @@ def ensure_defaults() -> None:
         config['AI_PROVIDER'] = 'openai'
         dirty = True
 
+    if 'SYSTEM_PROMPT' not in config:
+        config['SYSTEM_PROMPT'] = ''
+        dirty = True
+
     if dirty:
         write_config(config)
 

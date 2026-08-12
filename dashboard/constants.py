@@ -10,7 +10,6 @@ SERVER_DIR = __dirname  # public alias
 ROOT_DIR = os.path.join(__dirname, '..')
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
 ENV_FILE = os.path.join(DATA_DIR, 'ai_settings.env')
-CHATS_DIR = os.path.join(DATA_DIR, 'chats')
 HTML_FILE = os.path.join(__dirname, 'index.html')
 
 # Host/port — configurable via environment variables

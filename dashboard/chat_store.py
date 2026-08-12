@@ -8,13 +8,10 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from .constants import CHATS_DIR
-
-
 class ChatStore:
     """Manages chat history via JSON files on disk."""
 
-    def __init__(self, chats_dir: str = CHATS_DIR) -> None:
+    def __init__(self, chats_dir: str) -> None:
         self._dir = chats_dir
         os.makedirs(self._dir, exist_ok=True)
 

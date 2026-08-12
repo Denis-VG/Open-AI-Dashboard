@@ -125,27 +125,9 @@ async def _chat(req: Request) -> StreamResponse:
         return resp
 
     tools: ToolRegistry = req.app['tool_registry']
-    work_dir_display = os.path.join(tools._work_dir, '')
 
-    system_prompts = {
-        'normal': (
-            f'You are a helpful, precise AI assistant. '
-            f'The current working directory is: {work_dir_display}. '
-            f'You have tools: write_file (max 10MB), append_file, write_file_chunk, '
-            f'read_file (max 512KB), list_directory, execute_command, search_files. '
-            f'Before executing any significant action, briefly explain what you are about to do.'
-        ),
-        'limitless': (
-            f'You are an autonomous AI assistant in Limitless mode. '
-            f'The current working directory is: {work_dir_display}. '
-            f'You have tools: write_file, append_file, write_file_chunk, read_file, '
-            f'list_directory, execute_command, search_files. '
-            f'Execute tasks directly and completely without asking for confirmation. '
-            f'Be decisive and thorough. Do not ask clarifying questions — '
-            f'make reasonable assumptions and proceed immediately with full results.'
-        ),
-    }
-    sys_content = system_prompts.get(mode, system_prompts['normal'])
+    from ..agent import get_system_prompt
+    sys_content = get_system_prompt(mode, tools._work_dir)
     history = [m for m in messages if m.get('role') != 'system']
     all_messages = [{'role': 'system', 'content': sys_content}] + history + [{'role': 'user', 'content': user_message}]
 

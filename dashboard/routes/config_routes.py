@@ -121,11 +121,30 @@ async def _profiles_view(req: Request) -> web.Response:
     return web.json_response({'success': True, 'config': config})
 
 
+# ── System prompt endpoint ─────────────────────────────────────────────
+
+async def _system_prompt_get(_req: Request) -> web.Response:
+    cfg = read_config()
+    return web.json_response({'prompt': cfg.get('SYSTEM_PROMPT', '')})
+
+
+async def _system_prompt_post(req: Request) -> web.Response:
+    data = await req.json()
+    cfg = read_config()
+    cfg['SYSTEM_PROMPT'] = data.get('prompt', '')
+    write_config(cfg)
+    return web.json_response({'success': True})
+
+
 def register(app: web.Application) -> None:
     app.router.add_get('/api/config', _config_get)
     app.router.add_post('/api/config', _config_post)
     app.router.add_get('/api/config/export', _config_export)
     app.router.add_post('/api/config/import', _config_import)
+
+    # System prompt
+    app.router.add_get('/api/system-prompt', _system_prompt_get)
+    app.router.add_post('/api/system-prompt', _system_prompt_post)
 
     # Profiles
     app.router.add_get('/api/profiles', _profiles_list)

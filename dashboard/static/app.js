@@ -211,7 +211,7 @@ function switchPage(name) {
     var tabEl = document.getElementById(tabs[name]);
     if (tabEl) tabEl.classList.add('active');
 
-    if (name === 'setup') loadProfiles();
+    if (name === 'setup') { loadProfiles(); loadSystemPrompt(); }
     if (name === 'system') loadSystemInfo();
     if (name === 'updates') checkUpdates();
 }
@@ -1445,6 +1445,42 @@ async function deleteProfile(name) {
         console.error('deleteProfile failed:', e);
         showToast('Failed to delete profile', 'error');
     }
+}
+
+// ─── System Prompt Editor ────────────────────────────────────────────────────
+
+async function loadSystemPrompt() {
+    try {
+        var res = await fetch(API + '/api/system-prompt');
+        var d = await res.json();
+        document.getElementById('systemPromptEditor').value = d.prompt || '';
+    } catch (e) {
+        console.error('loadSystemPrompt failed:', e);
+    }
+}
+
+async function saveSystemPrompt() {
+    var prompt = document.getElementById('systemPromptEditor').value;
+    try {
+        await fetch(API + '/api/system-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt })
+        });
+        var st = document.getElementById('sysPromptStatus');
+        st.textContent = '\u2713 Saved';
+        st.style.color = 'var(--success)';
+        setTimeout(function () { st.textContent = ''; }, 2000);
+    } catch (e) {
+        console.error('saveSystemPrompt failed:', e);
+        showToast('Failed to save system prompt', 'error');
+    }
+}
+
+async function resetSystemPrompt() {
+    if (!confirm('Reset system prompt to default? This will clear your custom instructions.')) return;
+    document.getElementById('systemPromptEditor').value = '';
+    await saveSystemPrompt();
 }
 
 // ─── System Info ────────────────────────────────────────────────────────────
