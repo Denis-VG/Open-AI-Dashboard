@@ -268,6 +268,7 @@ function formatTokens(n) {
 function extractCacheTokens(usage) {
     return usage.cached_tokens
         || usage.cache_read_input_tokens
+        || usage.prompt_cache_hit_tokens
         || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens)
         || (usage.promptTokensDetails && usage.promptTokensDetails.cachedTokens)
         || 0;
