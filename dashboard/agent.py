@@ -40,7 +40,6 @@ _DEFAULT_SYSTEM_PROMPTS = {
         'write_file_chunk (write at offset), read_file (max 512KB), list_directory, '
         'execute_command, search_files. '
         'The current working directory is: {work_dir}. '
-        'Before executing write operations, briefly explain what you are about to do. '
         'Use tools to actually perform actions - do not just describe what to do.'
     ),
     'limitless': (
@@ -49,7 +48,6 @@ _DEFAULT_SYSTEM_PROMPTS = {
         'write_file_chunk, read_file (max 512KB), list_directory, '
         'execute_command, search_files. '
         'The current working directory is: {work_dir}. '
-        'Execute tasks directly and completely without asking for confirmation. '
         'Use tools to actually perform actions. Be decisive and thorough.'
     ),
 }
@@ -255,8 +253,7 @@ class AgentLoop:
     ) -> None:
         """Execute each tool call, handling approvals."""
         for tc in tool_calls:
-            is_write = self._tools.is_write_tool(tc['name'])
-            needs_approval = is_write and mode != 'limitless'
+            needs_approval = self._tools.needs_approval(tc['name']) and mode != 'limitless'
 
             await on_event({
                 'type': 'tool_call',

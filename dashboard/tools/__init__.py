@@ -135,7 +135,9 @@ TOOL_DEFS: list[dict] = [
     }
 ]
 
-WRITE_TOOLS = {'write_file', 'append_file', 'write_file_chunk', 'execute_command'}
+WRITE_TOOLS = {'write_file', 'append_file', 'write_file_chunk'}
+EXEC_TOOLS = {'execute_command'}
+DANGEROUS_TOOLS = WRITE_TOOLS | EXEC_TOOLS
 
 
 # ── ToolRegistry ──────────────────────────────────────────────────
@@ -146,6 +148,7 @@ class ToolRegistry:
     def __init__(self, work_dir: str) -> None:
         self._work_dir = work_dir
         self._write_tools = WRITE_TOOLS
+        self._dangerous_tools = DANGEROUS_TOOLS
 
     # ── path resolution ───────────────────────────────────────────
 
@@ -202,6 +205,10 @@ class ToolRegistry:
 
     def is_write_tool(self, name: str) -> bool:
         return name in self._write_tools
+
+    def needs_approval(self, name: str) -> bool:
+        """True for tools that should require user approval (write + exec)."""
+        return name in self._dangerous_tools
 
     # ── execution ──────────────────────────────────────────────────
 

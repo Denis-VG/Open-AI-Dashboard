@@ -853,7 +853,7 @@ function createToolCard(data) {
         + '<div class="tool-header" onclick="this.nextElementSibling.classList.toggle(\'open\')">'
         + '<span class="tool-icon">' + (icons[data.name] || '\ud83d\udd27') + '</span>'
         + '<span class="tool-name">' + data.name + '(' + escHtml(String(argsPreview || '').slice(0, 60)) + ')</span>'
-        + '<span class="tool-status running">' + (data.needsApproval ? 'Pending' : 'Running') + '</span>'
+        + '<span class="tool-status running">' + (data.needs_approval ? 'Pending' : 'Running') + '</span>'
         + '</div>'
         + '<div class="tool-body">' + (data.name === 'write_file' ? escHtml(data.args.content || '').slice(0, 2000) : JSON.stringify(data.args, null, 2)) + '</div>'
         + '</div></div>';
