@@ -132,7 +132,7 @@
         <!-- System Prompt Editor -->
         <div class="card" style="margin-top:20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div><h2 style="margin-bottom:2px">System Prompt</h2><p class="subtitle" style="margin-bottom:0">Custom instructions for the agent (leave blank for defaults)</p></div>
+            <div><h2 style="margin-bottom:2px">System Prompt (Agent mode)</h2><p class="subtitle" style="margin-bottom:0">Custom instructions for the agent chat mode (leave blank for defaults)</p></div>
           </div>
           <textarea id="systemPromptEditor" rows="4" placeholder="You are a helpful AI assistant..."
             style="width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:inherit;font-size:0.82rem;line-height:1.6;resize:vertical;margin-bottom:10px"
@@ -142,6 +142,31 @@
             <button class="btn btn-outline btn-sm" onclick="resetSystemPrompt()">Reset to Default</button>
           </div>
           <div id="sysPromptStatus" style="font-size:0.75rem;margin-top:8px;color:var(--text2)"></div>
+
+          <!-- Default prompt reference -->
+          <details style="margin-top:10px">
+            <summary style="cursor:pointer;font-size:0.8rem;color:var(--text2)">View default prompt</summary>
+            <div style="margin-top:8px">
+              <textarea readonly rows="3" id="defaultPromptRef"
+                style="width:100%;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text3);font-family:inherit;font-size:0.7rem;line-height:1.4;resize:none"
+              ></textarea>
+            </div>
+          </details>
+        </div>
+
+        <!-- Project Instructions -->
+        <div class="card" style="margin-top:20px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div><h2 style="margin-bottom:2px">Project Instructions</h2><p class="subtitle" style="margin-bottom:0">Appended to the system prompt for this project (stored in .ai/project_prompt.txt)</p></div>
+          </div>
+          <textarea id="projectPromptEditor" rows="3" placeholder="This project is a Python web dashboard..."
+            style="width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:inherit;font-size:0.82rem;line-height:1.6;resize:vertical;margin-bottom:10px"
+          ></textarea>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="saveProjectPrompt()">Save</button>
+            <button class="btn btn-outline btn-sm" onclick="resetProjectPrompt()">Clear</button>
+          </div>
+          <div id="projPromptStatus" style="font-size:0.75rem;margin-top:8px;color:var(--text2)"></div>
         </div>
 
         <div class="steps">

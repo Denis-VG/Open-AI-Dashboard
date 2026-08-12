@@ -218,7 +218,7 @@ function switchPage(name) {
     var tabEl = document.getElementById(tabs[name]);
     if (tabEl) tabEl.classList.add('active');
 
-    if (name === 'setup') { loadProfiles(); loadSystemPrompt(); }
+    if (name === 'setup') { loadProfiles(); loadSystemPrompt(); loadProjectPrompt(); }
     if (name === 'system') loadSystemInfo();
     if (name === 'updates') checkUpdates();
 }
@@ -1579,11 +1579,14 @@ async function deleteProfile(name) {
 
 // ─── System Prompt Editor ────────────────────────────────────────────────────
 
+var DEFAULT_PROMPT = 'You are a powerful AI coding agent running in a web dashboard. You have access to tools: write_file (max 10MB), append_file (append), write_file_chunk (write at offset), read_file (max 512KB), list_directory, execute_command, search_files. The current working directory is: {work_dir}. Use tools to actually perform actions - do not just describe what to do.';
+
 async function loadSystemPrompt() {
     try {
         var res = await fetch(API + '/api/system-prompt');
         var d = await res.json();
         document.getElementById('systemPromptEditor').value = d.prompt || '';
+        document.getElementById('defaultPromptRef').value = DEFAULT_PROMPT;
     } catch (e) {
         console.error('loadSystemPrompt failed:', e);
     }
@@ -1611,6 +1614,42 @@ async function resetSystemPrompt() {
     if (!confirm('Reset system prompt to default? This will clear your custom instructions.')) return;
     document.getElementById('systemPromptEditor').value = '';
     await saveSystemPrompt();
+}
+
+// ─── Project Prompt Editor ───────────────────────────────────────────────────
+
+async function loadProjectPrompt() {
+    try {
+        var res = await fetch(API + '/api/project-prompt');
+        var d = await res.json();
+        document.getElementById('projectPromptEditor').value = d.prompt || '';
+    } catch (e) {
+        console.error('loadProjectPrompt failed:', e);
+    }
+}
+
+async function saveProjectPrompt() {
+    var prompt = document.getElementById('projectPromptEditor').value;
+    try {
+        await fetch(API + '/api/project-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt })
+        });
+        var st = document.getElementById('projPromptStatus');
+        st.textContent = '\u2713 Saved';
+        st.style.color = 'var(--success)';
+        setTimeout(function () { st.textContent = ''; }, 2000);
+    } catch (e) {
+        console.error('saveProjectPrompt failed:', e);
+        showToast('Failed to save project prompt', 'error');
+    }
+}
+
+async function resetProjectPrompt() {
+    if (!confirm('Clear project instructions?')) return;
+    document.getElementById('projectPromptEditor').value = '';
+    await saveProjectPrompt();
 }
 
 // ─── System Info ────────────────────────────────────────────────────────────

@@ -33,24 +33,14 @@ _TOOL_UNSUPPORTED_MARKERS = (
     'does not support', 'invalid parameter', 'not allowed',
 )
 
-_DEFAULT_SYSTEM_PROMPTS = {
-    'normal': (
-        'You are a powerful AI coding agent running in a web dashboard. '
-        'You have access to tools: write_file (max 10MB), append_file (append), '
-        'write_file_chunk (write at offset), read_file (max 512KB), list_directory, '
-        'execute_command, search_files. '
-        'The current working directory is: {work_dir}. '
-        'Use tools to actually perform actions - do not just describe what to do.'
-    ),
-    'limitless': (
-        'You are an autonomous AI coding agent running in Limitless mode. '
-        'You have access to tools: write_file (max 10MB), append_file, '
-        'write_file_chunk, read_file (max 512KB), list_directory, '
-        'execute_command, search_files. '
-        'The current working directory is: {work_dir}. '
-        'Use tools to actually perform actions. Be decisive and thorough.'
-    ),
-}
+_DEFAULT_SYSTEM_PROMPT = (
+    'You are a powerful AI coding agent running in a web dashboard. '
+    'You have access to tools: write_file (max 10MB), append_file (append), '
+    'write_file_chunk (write at offset), read_file (max 512KB), list_directory, '
+    'execute_command, search_files. '
+    'The current working directory is: {work_dir}. '
+    'Use tools to actually perform actions - do not just describe what to do.'
+)
 
 
 def get_system_prompt(mode: str, work_dir: str) -> str:
@@ -63,12 +53,23 @@ def get_system_prompt(mode: str, work_dir: str) -> str:
     custom = cfg.get('SYSTEM_PROMPT', '').strip()
 
     if custom:
-        return custom.format(work_dir=work_dir)
+        base = custom.format(work_dir=work_dir)
+    else:
+        work_dir_display = os.path.join(work_dir, '')
+        base = _DEFAULT_SYSTEM_PROMPT.format(work_dir=work_dir_display)
 
-    work_dir_display = os.path.join(work_dir, '')
-    return _DEFAULT_SYSTEM_PROMPTS.get(mode, _DEFAULT_SYSTEM_PROMPTS['normal']).format(
-        work_dir=work_dir_display
-    )
+    # Append project-specific instructions if present
+    project_path = os.path.join(work_dir, '.ai', 'project_prompt.txt')
+    if os.path.exists(project_path):
+        try:
+            with open(project_path, 'r', encoding='utf-8') as f:
+                project_prompt = f.read().strip()
+            if project_prompt:
+                base += '\n\n' + project_prompt
+        except Exception:
+            pass
+
+    return base
 
 
 class AgentLoop:

@@ -136,6 +136,31 @@ async def _system_prompt_post(req: Request) -> web.Response:
     return web.json_response({'success': True})
 
 
+# ── Project prompt ─────────────────────────────────────────────────────
+
+async def _project_prompt_get(req: Request) -> web.Response:
+    work_dir = req.app['work_dir']
+    path = os.path.join(work_dir, '.ai', 'project_prompt.txt')
+    if not os.path.exists(path):
+        return web.json_response({'prompt': ''})
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return web.json_response({'prompt': f.read()})
+    except Exception:
+        return web.json_response({'prompt': ''})
+
+
+async def _project_prompt_post(req: Request) -> web.Response:
+    data = await req.json()
+    work_dir = req.app['work_dir']
+    prompt = data.get('prompt', '')
+    path = os.path.join(work_dir, '.ai', 'project_prompt.txt')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(prompt)
+    return web.json_response({'success': True})
+
+
 # ── Project-level token usage ──────────────────────────────────────────
 
 async def _project_usage_get(req: Request) -> web.Response:
@@ -190,6 +215,10 @@ def register(app: web.Application) -> None:
     # Project token usage
     app.router.add_get('/api/project-usage', _project_usage_get)
     app.router.add_post('/api/project-usage', _project_usage_post)
+
+    # Project prompt
+    app.router.add_get('/api/project-prompt', _project_prompt_get)
+    app.router.add_post('/api/project-prompt', _project_prompt_post)
 
     # Profiles
     app.router.add_get('/api/profiles', _profiles_list)
