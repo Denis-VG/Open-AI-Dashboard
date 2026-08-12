@@ -14,7 +14,6 @@ let setupState = { provider: '', key: '', model: '', tier: 'free', baseUrl: '' }
 let streamController = null;
 let userScrolled = false;
 let currentMode = 'normal';
-let modeLocked = false;
 let agentMode = false;
 let workDir = '';
 
@@ -305,12 +304,6 @@ async function openChatById(id) {
             : 'Message AI...';
         if (isAgentChat) loadWorkDir();
 
-        if (chatMessages.length > 0) {
-            modeLocked = true;
-            document.getElementById('modeToggle').style.display = 'none';
-        } else {
-            resetMode();
-        }
         loadChatList();
         switchPage('chat');
     } catch (e) {
@@ -387,22 +380,13 @@ async function startNewChat() {
 
 // ─── Mode Toggle ────────────────────────────────────────────────────────────
 function setMode(mode) {
-    if (modeLocked) return;
     currentMode = mode;
     document.getElementById('modeNormal').className = 'mode-pill' + (mode === 'normal' ? ' active-normal' : '');
     document.getElementById('modeLimitless').className = 'mode-pill' + (mode === 'limitless' ? ' active-limitless' : '');
 }
 
-function lockMode() {
-    modeLocked = true;
-    document.getElementById('modeToggle').style.display = 'none';
-}
-
 function resetMode() {
-    modeLocked = false;
     currentMode = 'normal';
-    document.getElementById('modeToggle').style.display = 'flex';
-    document.getElementById('modePills').classList.remove('mode-locked');
     setMode('normal');
 }
 
@@ -495,7 +479,6 @@ async function sendMessage() {
     }
 
     if (!currentChatId) await startNewChat();
-    if (!modeLocked) lockMode();
 
     input.value = '';
     input.style.height = 'auto';
