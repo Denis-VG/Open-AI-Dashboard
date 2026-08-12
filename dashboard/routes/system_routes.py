@@ -41,9 +41,18 @@ async def _updates_install(_req: Request) -> web.Response:
     return web.json_response({'error': 'Not implemented in Python'}, status=501)
 
 
+async def _shutdown(_req: Request) -> web.Response:
+    """Gracefully shut down the server."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.call_later(0.3, lambda: __import__('os')._exit(0))
+    return web.json_response({'success': True})
+
+
 def register(app: web.Application) -> None:
     app.router.add_get('/api/system', _system)
     app.router.add_get('/api/logs', _logs)
     app.router.add_get('/api/logs/read', _logs_read)
     app.router.add_get('/api/updates', _updates)
     app.router.add_post('/api/updates/install', _updates_install)
+    app.router.add_post('/api/shutdown', _shutdown)

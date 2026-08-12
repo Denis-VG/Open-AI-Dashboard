@@ -1467,6 +1467,20 @@ async function importConfig(event) {
     event.target.value = '';
 }
 
+async function shutdownServer() {
+    if (!confirm('Shut down the server and close this page?')) return;
+    try {
+        await fetch(API + '/api/shutdown', { method: 'POST' });
+    } catch (e) {
+        // Server may close before response — that's expected
+    }
+    window.close();
+    // Fallback if window.close() is blocked (not opened by script)
+    setTimeout(function () {
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Inter,system-ui,sans-serif;background:#0f1117;color:#e4e7ef;font-size:1.2rem">Server stopped. You may close this tab.</div>';
+    }, 500);
+}
+
 // ─── Updates ────────────────────────────────────────────────────────────────
 async function checkUpdates() {
     document.getElementById('updateCurrent').textContent = '...';
