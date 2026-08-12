@@ -649,7 +649,35 @@ body {
     margin-bottom: 10px;
     flex-wrap: wrap;
 }
-.mode-toggle .mode-label {
+
+/* Agent status dot (Thinking / Ready) */
+.agent-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+.agent-status.ready {
+    background: var(--success);
+}
+.agent-status.thinking {
+    background: var(--accent);
+    animation: statusPulse 1s ease-in-out infinite;
+}
+.agent-elapsed {
+    font-size: 0.65rem;
+    color: var(--text3);
+    margin-right: 6px;
+    font-variant-numeric: tabular-nums;
+}
+@keyframes statusPulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.3); }
+}
+
+.mode-label {
     font-size: 0.72rem;
     color: var(--text2);
     font-weight: 500;
@@ -869,81 +897,67 @@ body {
     text-decoration: underline;
 }
 
-/* Agent thinking card */
-.thinking-card {
+/* Inline reasoning cards (per-step, before tool calls) */
+.reasoning-card {
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 8px;
-    margin: 8px 0;
+    margin: 4px 0;
     overflow: hidden;
     font-size: 0.82rem;
 }
-.thinking-header {
+.reasoning-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 8px 12px;
     cursor: pointer;
     user-select: none;
-    transition: background 0.2s;
 }
-.thinking-header:hover {
-    background: rgba(255, 255, 255, 0.03);
-}
-.thinking-pulse {
-    width: 8px;
-    height: 8px;
+.reasoning-pulse {
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--accent);
-    animation: tpulse 1.2s ease-in-out infinite;
+    animation: rpulse 1.2s ease-in-out infinite;
     flex-shrink: 0;
 }
-.thinking-pulse.done {
+.reasoning-pulse.done {
     animation: none;
     background: var(--success);
 }
-@keyframes tpulse {
+@keyframes rpulse {
     0%, 100% { opacity: 0.3; transform: scale(0.8); }
     50% { opacity: 1; transform: scale(1.15); }
 }
-.thinking-label {
+.reasoning-label {
     flex: 1;
     font-weight: 600;
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     color: var(--text2);
 }
-.thinking-step {
-    font-size: 0.65rem;
-    color: var(--text3);
-    font-weight: 500;
-    padding: 2px 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-}
-.thinking-arrow {
-    font-size: 0.85rem;
+.reasoning-arrow {
+    font-size: 0.8rem;
     color: var(--text3);
     transition: transform 0.25s ease;
-    display: flex;
-    align-items: center;
 }
-.thinking-arrow.open {
+.reasoning-arrow.open {
     transform: rotate(180deg);
 }
-.thinking-body {
+.reasoning-body {
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.3s ease, padding 0.3s ease;
-    padding: 0 14px;
-    font-size: 0.76rem;
+    padding: 0 12px;
+    font-size: 0.72rem;
     line-height: 1.6;
     color: var(--text2);
     white-space: pre-wrap;
     word-break: break-word;
 }
-.thinking-body.open {
-    max-height: 500px;
-    padding: 12px 14px;
+.reasoning-body.open {
+    max-height: 400px;
+    padding: 10px 12px;
     overflow: auto;
     border-top: 1px solid var(--border);
 }

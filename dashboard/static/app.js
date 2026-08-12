@@ -579,6 +579,7 @@ async function sendMessage() {
 
     if (!currentChatId) await startNewChat();
 
+    setAgentStatus('thinking');
     input.value = '';
     input.style.height = 'auto';
 
@@ -607,6 +608,7 @@ async function sendMessage() {
     }
 
     isStreaming = false;
+    setAgentStatus('ready');
     streamController = null;
     document.getElementById('sendBtn').style.display = 'flex';
     document.getElementById('stopBtn').style.display = 'none';
@@ -685,9 +687,7 @@ async function sendAgentMessage(text, typingEl) {
     var aiMsgEl = null;
     var fullText = '';
     var toolCards = new Map();
-    var thinkingEl = null;
-    var thinkingContent = '';
-    var thinkingCount = 0;
+    var lastReasoningEl = null;
     try {
         streamController = new AbortController();
         var res = await fetch(API + '/api/agent', {
@@ -717,39 +717,18 @@ async function sendAgentMessage(text, typingEl) {
                 try {
                     var data = JSON.parse(line.slice(6));
                     if (data.type === 'agent_thinking') {
-                        thinkingCount = data.iteration;
-                        if (!thinkingEl) {
-                            thinkingEl = createThinkingEl(data.iteration);
-                            document.getElementById('messages').appendChild(thinkingEl);
-                        } else {
-                            var stepEl = thinkingEl.querySelector('.thinking-step');
-                            if (stepEl) stepEl.textContent = 'Step ' + data.iteration;
-                        }
-                        scrollToBottom();
+                        // Finalize previous reasoning card if any
+                        if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
+                        lastReasoningEl = null;
                     } else if (data.type === 'agent_reasoning') {
-                        thinkingCount = data.iteration || thinkingCount;
-                        if (!thinkingEl) {
-                            thinkingEl = createThinkingEl(thinkingCount);
-                            document.getElementById('messages').appendChild(thinkingEl);
-                        }
-                        if (thinkingContent) thinkingContent += '\n\n--- Step ' + thinkingCount + ' ---\n';
-                        thinkingContent += data.content;
-                        var bodyEl = document.getElementById('thinkBody');
-                        if (bodyEl) bodyEl.textContent = thinkingContent;
-                        var arrow = document.getElementById('thinkArrow');
-                        var body = document.getElementById('thinkBody');
-                        if (arrow && body && !body.classList.contains('open')) {
-                            body.classList.add('open');
-                            arrow.classList.add('open');
-                        }
-                        var stepEl2 = thinkingEl.querySelector('.thinking-step');
-                        if (stepEl2) stepEl2.textContent = 'Step ' + thinkingCount;
+                        // Finalize previous, create new inline reasoning card
+                        if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
+                        lastReasoningEl = createReasoningCard(data.iteration, data.content);
+                        document.getElementById('messages').appendChild(lastReasoningEl);
                         scrollToBottom();
                     } else if (data.type === 'tool_call') {
-                        if (thinkingEl) {
-                            var label = thinkingEl.querySelector('.thinking-label');
-                            if (label) label.textContent = 'Thinking \u2192 Acting';
-                        }
+                        // Finalize reasoning card so tool appears right after it
+                        if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         var card = createToolCard(data);
                         toolCards.set(data.id, card);
                         document.getElementById('messages').appendChild(card);
@@ -771,19 +750,19 @@ async function sendAgentMessage(text, typingEl) {
                             if (ab) ab.remove();
                         }
                     } else if (data.type === 'agent_text') {
-                        if (thinkingEl) finalizeThinkingEl(thinkingEl, thinkingCount);
+                        if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         fullText = data.content;
                         if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
                         finalizeMessage(aiMsgEl, fullText);
                         scrollToBottom();
                     } else if (data.type === 'agent_error') {
-                        if (thinkingEl) thinkingEl.remove();
+                        if (lastReasoningEl) { lastReasoningEl.remove(); lastReasoningEl = null; }
                         var errMsg2 = '\u26a0\ufe0f Agent Error: ' + (data.error || 'Unknown error');
                         appendMessage({ role: 'assistant', content: errMsg2 });
                         chatMessages.push({ role: 'assistant', content: errMsg2 });
                         loadChatList();
                     } else if (data.type === 'done') {
-                        if (thinkingEl) finalizeThinkingEl(thinkingEl, thinkingCount);
+                        if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         if (data.fullText) {
                             fullText = data.fullText;
                             chatMessages.push({ role: 'assistant', content: fullText });
@@ -804,40 +783,28 @@ async function sendAgentMessage(text, typingEl) {
     }
 }
 
-// ─── Thinking Card Helpers ──────────────────────────────────────────────────
-function createThinkingEl(iteration) {
+// ─── Inline Reasoning Cards ──────────────────────────────────────────────────
+function createReasoningCard(iteration, content) {
     var el = document.createElement('div');
     el.className = 'message';
-    el.id = 'agentThinkingMsg';
-    el.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="thinking-card">'
-        + '<div class="thinking-header" onclick="toggleThinking()">'
-        + '<div class="thinking-pulse"></div>'
-        + '<span class="thinking-label">Thinking...</span>'
-        + '<span class="thinking-step">Step ' + iteration + '</span>'
-        + '<span class="thinking-arrow" id="thinkArrow">\u25bc</span>'
+    el.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="reasoning-card open">'
+        + '<div class="reasoning-header" onclick="var b=this.nextElementSibling;b.classList.toggle(\'open\');this.querySelector(\'.reasoning-arrow\').classList.toggle(\'open\')">'
+        + '<span class="reasoning-pulse"></span>'
+        + '<span class="reasoning-label">Reasoning \u2014 Step ' + iteration + '</span>'
+        + '<span class="reasoning-arrow open">\u25bc</span>'
         + '</div>'
-        + '<div class="thinking-body" id="thinkBody"></div>'
+        + '<div class="reasoning-body open">' + escHtml(content) + '</div>'
         + '</div></div>';
     return el;
 }
 
-function finalizeThinkingEl(el, count) {
-    var pulse = el.querySelector('.thinking-pulse');
-    var label = el.querySelector('.thinking-label');
+function finalizeReasoningCard(el) {
+    var pulse = el.querySelector('.reasoning-pulse');
     if (pulse) pulse.classList.add('done');
-    if (label && count > 0) label.textContent = 'Thought for ' + count + ' step' + (count > 1 ? 's' : '');
-    var arrow = document.getElementById('thinkArrow');
-    var body = document.getElementById('thinkBody');
-    if (arrow && body) { body.classList.remove('open'); arrow.classList.remove('open'); }
-}
-
-function toggleThinking() {
-    var arrow = document.getElementById('thinkArrow');
-    var body = document.getElementById('thinkBody');
-    if (arrow && body) {
-        body.classList.toggle('open');
-        arrow.classList.toggle('open');
-    }
+    var body = el.querySelector('.reasoning-body');
+    var arrow = el.querySelector('.reasoning-arrow');
+    if (body) body.classList.remove('open');
+    if (arrow) arrow.classList.remove('open');
 }
 
 // ─── Tool Cards ─────────────────────────────────────────────────────────────
@@ -923,6 +890,41 @@ function updateToolCardResult(card, data) {
 function abortStream() {
     if (streamController) {
         streamController.abort();
+    }
+    setAgentStatus('ready');
+}
+
+// ─── Agent Status Indicator ──────────────────────────────────────────────────
+var _statusTimer = null;
+var _statusStart = 0;
+
+function setAgentStatus(state) {
+    var el = document.getElementById('agentStatus');
+    var timeEl = document.getElementById('agentElapsed');
+    if (!el) return;
+
+    // Clear any running timer
+    if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
+
+    if (state === 'thinking') {
+        el.className = 'agent-status thinking';
+        el.title = 'Thinking...';
+        _statusStart = Date.now();
+        if (timeEl) {
+            timeEl.textContent = '0s';
+            timeEl.style.display = '';
+        }
+        _statusTimer = setInterval(function () {
+            var sec = ((Date.now() - _statusStart) / 1000).toFixed(1);
+            if (timeEl) timeEl.textContent = sec + 's';
+        }, 200);
+    } else {
+        el.className = 'agent-status ready';
+        el.title = 'Ready';
+        if (timeEl) {
+            timeEl.textContent = '';
+            timeEl.style.display = 'none';
+        }
     }
 }
 
@@ -1128,6 +1130,7 @@ async function resendLastUserMessage() {
     }
 
     isStreaming = false;
+    setAgentStatus('ready');
     streamController = null;
     document.getElementById('sendBtn').style.display = 'flex';
     document.getElementById('stopBtn').style.display = 'none';
