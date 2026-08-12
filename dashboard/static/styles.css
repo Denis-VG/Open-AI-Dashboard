@@ -652,8 +652,8 @@ body {
 
 /* Agent status dot (Thinking / Ready) */
 .agent-status {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     display: inline-block;
     margin-right: 8px;

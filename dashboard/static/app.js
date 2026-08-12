@@ -908,6 +908,7 @@ function setAgentStatus(state) {
 
     // Clear any running timer
     if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
+    if (state !== 'thinking' && state !== 'reasoning' && state !== 'exec') _statusStart = 0;
 
     var labels = { ready: 'Ready', thinking: 'Thinking', reasoning: 'Reasoning', exec: 'Exec', error: 'Error' };
     var label = labels[state] || state;
@@ -915,7 +916,7 @@ function setAgentStatus(state) {
     if (state === 'ready') {
         el.className = 'agent-status ready';
         el.title = 'Ready';
-        if (timeEl) { timeEl.textContent = ''; timeEl.style.display = 'none'; }
+        if (timeEl) { timeEl.textContent = label; timeEl.style.display = ''; }
     } else if (state === 'error') {
         el.className = 'agent-status error';
         el.title = label;
