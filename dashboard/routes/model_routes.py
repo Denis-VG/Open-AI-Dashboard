@@ -37,6 +37,28 @@ async def _nvidia_models(_req: Request) -> web.Response:
     return web.json_response({'models': models})
 
 
+async def _anthropic_models(req: Request) -> web.Response:
+    data = await req.json()
+    base_url = data.get('baseUrl', 'https://api.anthropic.com/v1')
+    key = data.get('key')
+    if not key:
+        return web.json_response({'models': []}, status=400)
+    base_url = base_url.rstrip('/')
+    try:
+        async with ClientSession() as session:
+            async with session.get(
+                f'{base_url}/models',
+                headers={'x-api-key': key, 'anthropic-version': '2023-06-01'}
+            ) as resp:
+                if resp.status != 200:
+                    return web.json_response({'models': [], 'error': f'Status {resp.status}'})
+                d = await resp.json()
+                models = [m['id'] for m in d.get('data', []) if m.get('id')]
+                return web.json_response({'models': models})
+    except Exception as e:
+        return web.json_response({'models': [], 'error': str(e)})
+
+
 async def _deepseek_models(req: Request) -> web.Response:
     data = await req.json()
     key = data.get('key')
@@ -142,6 +164,18 @@ async def _verify_key(req: Request) -> web.Response:
                         valid = resp.status == 200
             except Exception:
                 valid = False
+        elif provider == 'custom-anthropic':
+            if base_url:
+                clean = base_url.rstrip('/')
+                try:
+                    async with ClientSession() as session:
+                        async with session.get(
+                            f'{clean}/models',
+                            headers={'x-api-key': key or 'not-needed', 'anthropic-version': '2023-06-01'}
+                        ) as resp:
+                            valid = resp.status == 200
+                except Exception:
+                    valid = False
         elif provider == 'custom-openai':
             if base_url:
                 clean = base_url.rstrip('/')
@@ -174,4 +208,5 @@ def register(app: web.Application) -> None:
     app.router.add_get('/api/nvidia/models', _nvidia_models)
     app.router.add_post('/api/deepseek/models', _deepseek_models)
     app.router.add_post('/api/openai-compatible/models', _openai_compatible_models)
+    app.router.add_post('/api/anthropic/models', _anthropic_models)
     app.router.add_post('/api/verify-key', _verify_key)

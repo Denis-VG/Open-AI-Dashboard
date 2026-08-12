@@ -26,7 +26,8 @@ const defaults = {
     nvidia: 'meta/llama-3.1-70b-instruct',
     deepseek: 'deepseek-v4-flash',
     lmstudio: '',
-    'custom-openai': ''
+    'custom-openai': '',
+    'custom-anthropic': 'claude-sonnet-4-20250514'
 };
 
 const providerNames = {
@@ -38,7 +39,8 @@ const providerNames = {
     nvidia: 'NVIDIA NIM',
     deepseek: 'DeepSeek',
     lmstudio: 'LM Studio',
-    'custom-openai': 'Custom OpenAI-Compatible'
+    'custom-openai': 'Custom OpenAI-Compatible',
+    'custom-anthropic': 'Custom Anthropic API'
 };
 
 // ─── Provider Config Table (data-driven, replaces if-else chain) ────────────
@@ -66,6 +68,10 @@ const PROVIDER_CONFIGS = {
     'custom-openai': {
         AI_PROVIDER: 'openai',
         CLAUDE_CODE_USE_OPENAI: '1',
+    },
+    'custom-anthropic': {
+        AI_PROVIDER: 'anthropic',
+        CLAUDE_CODE_USE_ANTHROPIC: '1',
     },
     openai: {
         AI_PROVIDER: 'openai',
@@ -1157,6 +1163,7 @@ function prepareKeyStep() {
     var p = setupState.provider;
     var isLM = p === 'lmstudio';
     var isCustom = p === 'custom-openai';
+    var isCustomAnth = p === 'custom-anthropic';
     var title = document.getElementById('keyStepTitle');
     var sub = document.getElementById('keyStepSubtitle');
     var guide = document.getElementById('providerGuide');
@@ -1164,20 +1171,24 @@ function prepareKeyStep() {
     var apiKey = document.getElementById('apiKey');
     var baseUrl = document.getElementById('baseUrl');
     document.getElementById('keyStatus').innerHTML = '';
-    baseWrap.style.display = (isLM || isCustom) ? '' : 'none';
-    guide.style.display = (isLM || isCustom) ? '' : 'none';
+    baseWrap.style.display = (isLM || isCustom || isCustomAnth) ? '' : 'none';
+    guide.style.display = (isLM || isCustom || isCustomAnth) ? '' : 'none';
     apiKey.parentElement.style.display = isLM ? 'none' : '';
     apiKey.placeholder = isLM ? '' : 'sk-...';
     baseUrl.value = isLM ? 'http://localhost:1234/v1' : (setupState.baseUrl || '');
-    title.textContent = isLM ? 'Connect LM Studio' : isCustom ? 'Connect Custom API' : 'Enter API Key';
+    title.textContent = isLM ? 'Connect LM Studio' : isCustomAnth ? 'Connect Anthropic API' : isCustom ? 'Connect Custom API' : 'Enter API Key';
     sub.textContent = isLM
         ? 'LM Studio must be running before verification'
-        : isCustom
-            ? 'Enter your OpenAI-compatible endpoint details'
-            : 'Paste your provider API key below';
+        : isCustomAnth
+            ? 'Enter your Anthropic-compatible API endpoint'
+            : isCustom
+                ? 'Enter your OpenAI-compatible endpoint details'
+                : 'Paste your provider API key below';
     guide.innerHTML = isLM
         ? 'In LM Studio, load a model, open <strong>Developer &gt; Local Server</strong>, then start the server. The default OpenAI-compatible base URL is <strong>http://localhost:1234/v1</strong>.'
-        : 'Use the provider base URL that already includes <strong>/v1</strong>. This setup checks <strong>/models</strong> and then uses the same URL for chat requests.';
+        : isCustomAnth
+            ? 'Enter the Anthropic-compatible base URL (without trailing slash). The dashboard will use it for /v1/messages.'
+            : 'Use the provider base URL that already includes <strong>/v1</strong>. This setup checks <strong>/models</strong> and then uses the same URL for chat requests.';
 }
 
 function goStep(n) {
@@ -1197,10 +1208,11 @@ function goStep(n) {
 async function verifyKey() {
     var isLM = setupState.provider === 'lmstudio';
     var isCustom = setupState.provider === 'custom-openai';
+    var isCustomAnth = setupState.provider === 'custom-anthropic';
     var key = isLM ? 'lm-studio' : (document.getElementById('apiKey').value.trim() || (isCustom ? 'not-needed' : ''));
     var baseUrlInput = document.getElementById('baseUrl');
     var baseUrl = (baseUrlInput ? baseUrlInput.value : '').trim().replace(/\/+$/, '');
-    if ((isLM || isCustom) && !baseUrl) { showKeyStatus('Base URL cannot be empty', 'error'); return; }
+    if ((isLM || isCustom || isCustomAnth) && !baseUrl) { showKeyStatus('Base URL cannot be empty', 'error'); return; }
     if (!key) { showKeyStatus('API key cannot be empty', 'error'); return; }
     setupState.key = key;
     setupState.baseUrl = baseUrl;
@@ -1248,8 +1260,9 @@ async function initModelStep() {
     var isNvidia = setupState.provider === 'nvidia';
     var isDeepSeek = setupState.provider === 'deepseek';
     var isOpenAICompat = setupState.provider === 'lmstudio' || setupState.provider === 'custom-openai';
+    var isAnthropicCompat = setupState.provider === 'custom-anthropic';
     document.getElementById('tierToggle').style.display = isOR ? '' : 'none';
-    document.getElementById('modelSearchWrap').style.display = (isOR || isOllama || isNvidia || isDeepSeek || isOpenAICompat) ? '' : 'none';
+    document.getElementById('modelSearchWrap').style.display = (isOR || isOllama || isNvidia || isDeepSeek || isOpenAICompat || isAnthropicCompat) ? '' : 'none';
     document.getElementById('modelSearch').style.display = isOllama ? 'none' : '';
     document.getElementById('manualModelWrap').style.display = '';
     if (isOR) fetchModels(setupState.tier);
@@ -1257,6 +1270,7 @@ async function initModelStep() {
     else if (isNvidia) await fetchNvidiaModels();
     else if (isDeepSeek) await fetchDeepSeekModels();
     else if (isOpenAICompat) await fetchOpenAICompatibleModels();
+    else if (isAnthropicCompat) await fetchAnthropicCompatibleModels();
     else { document.getElementById('manualModel').placeholder = 'Default: ' + (defaults[setupState.provider] || ''); }
 }
 
@@ -1343,6 +1357,28 @@ async function fetchOpenAICompatibleModels() {
         console.error('fetchOpenAICompatibleModels failed:', e);
         allModels = [];
         listEl.innerHTML = '<div style="padding:14px;color:var(--text2);font-size:0.8rem">Failed to load models. Enter the model name manually below.</div>';
+    }
+    loadEl.style.display = 'none';
+}
+
+async function fetchAnthropicCompatibleModels() {
+    var listEl = document.getElementById('modelList');
+    var loadEl = document.getElementById('modelLoading');
+    listEl.innerHTML = ''; loadEl.style.display = 'flex';
+    try {
+        var res = await fetch(API + '/api/anthropic/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ baseUrl: setupState.baseUrl, key: setupState.key })
+        });
+        var d = await res.json();
+        allModels = d.models || [];
+        if (allModels.length) renderModels(allModels);
+        else listEl.innerHTML = '<div style="padding:14px;color:var(--text2);font-size:0.8rem">No models returned. Enter the model name manually.</div>';
+    } catch (e) {
+        console.error('fetchAnthropicCompatibleModels failed:', e);
+        allModels = [];
+        listEl.innerHTML = '<div style="padding:14px;color:var(--text2);font-size:0.8rem">Failed to load models. Enter the model name manually.</div>';
     }
     loadEl.style.display = 'none';
 }

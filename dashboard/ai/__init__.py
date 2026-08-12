@@ -223,10 +223,11 @@ class AnthropicProvider(AIProvider):
             'anthropic-beta': 'prompt-caching-2024-07-31',
         }
 
+        base_url = cfg.get('ANTHROPIC_BASE_URL', 'https://api.anthropic.com/v1')
         try:
             async with ClientSession() as session:
                 async with session.post(
-                    'https://api.anthropic.com/v1/messages',
+                    f'{base_url.rstrip("/")}/messages',
                     json=payload, headers=headers,
                     timeout=ClientTimeout(total=_API_TIMEOUT)
                 ) as resp:
