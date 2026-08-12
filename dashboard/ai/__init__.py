@@ -144,7 +144,8 @@ class OpenAIProvider(AIProvider):
                         'usage': data.get('usage', {}),
                     }
         except Exception as exc:
-            log_api_error('openai', str(exc), payload,
+            err_msg = str(exc) or type(exc).__name__
+            log_api_error('openai', err_msg, payload,
                           _try_get_response(exc, None))
             raise
 
@@ -256,7 +257,8 @@ class AnthropicProvider(AIProvider):
                         'usage': data.get('usage', {}),
                     }
         except Exception as exc:
-            log_api_error('anthropic', str(exc), payload,
+            err_msg = str(exc) or type(exc).__name__
+            log_api_error('anthropic', err_msg, payload,
                           _try_get_response(exc, None))
             raise
 
@@ -367,8 +369,9 @@ class GeminiProvider(AIProvider):
                         'usage': data.get('usageMetadata', {}),
                     }
         except Exception as exc:
+            err_msg = str(exc) or type(exc).__name__
             # Log the payload + masked URL as request body
-            log_api_error('gemini', str(exc),
+            log_api_error('gemini', err_msg,
                           {'url': safe_url, 'payload': payload},
                           _try_get_response(exc, None))
             raise

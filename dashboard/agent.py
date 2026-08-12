@@ -183,7 +183,7 @@ class AgentLoop:
         try:
             return await self._provider.call(messages, read_config(), include_tools=True)
         except Exception as exc:
-            err = str(exc) or 'Unknown error'
+            err = str(exc) or type(exc).__name__ or 'Unknown error'
 
             # Only attempt fallback on errors that smell like tool-related issues
             if iteration == 0 and self._looks_like_tool_error(err):
