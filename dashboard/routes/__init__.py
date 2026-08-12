@@ -17,6 +17,14 @@ def register_all(app: web.Application) -> None:
         agent_routes,
     )
 
+    import os as _os
+    from ..constants import SERVER_DIR as _SD
+
+    # Static files (CSS, JS, assets)
+    _static_dir = _os.path.join(_SD, 'static')
+    if _os.path.isdir(_static_dir):
+        app.router.add_static('/static/', _static_dir, name='static')
+
     # Static file / index
     app.router.add_get('/', config_routes.handle_index)
 

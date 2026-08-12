@@ -29,4 +29,5 @@ data/profiles/
 # Для .github это сработает, но папки .github и .AI обычно пишутся БЕЗ ведущего слэша.
 .github/
 .AI/
-.temp/
+.Temp/
+.codewhale/
