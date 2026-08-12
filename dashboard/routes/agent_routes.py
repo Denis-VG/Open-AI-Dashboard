@@ -41,9 +41,17 @@ def _save_assistant_reply(
     chat_id: str,
     user_message: str,
     full_text: str,
+    messages: list[dict] | None = None,
 ) -> None:
-    """Persist user + assistant messages into the chat."""
+    """Persist user + assistant messages into the chat.
+
+    If *messages* is provided, it replaces the chat history entirely
+    (so edits/truncations from the frontend are preserved). Otherwise
+    the existing chat is loaded from disk and appended to.
+    """
     existing = store.load(chat_id) or store.init_chat(chat_id, user_message[:50])
+    if messages is not None:
+        existing['messages'] = list(messages)
     existing['messages'].append({'role': 'user', 'content': user_message})
     existing['messages'].append({'role': 'assistant', 'content': full_text})
     existing['updated'] = datetime.now().isoformat()
@@ -85,7 +93,7 @@ async def _agent(req: Request) -> StreamResponse:
     try:
         full_text = await loop.run(all_messages, mode, sse.send)
         if chat_id and full_text:
-            _save_assistant_reply(store, chat_id, user_message, full_text)
+            _save_assistant_reply(store, chat_id, user_message, full_text, messages)
     except Exception as e:
         # ❌ Do NOT save the error as an assistant reply — that creates a
         #    feedback loop where the model sees "⚠️ Agent Error: ..." as
@@ -153,7 +161,7 @@ async def _chat(req: Request) -> StreamResponse:
 
     if chat_id and full_text:
         store: ChatStore = req.app['chat_store']
-        _save_assistant_reply(store, chat_id, user_message, full_text)
+        _save_assistant_reply(store, chat_id, user_message, full_text, messages)
 
     return resp
 

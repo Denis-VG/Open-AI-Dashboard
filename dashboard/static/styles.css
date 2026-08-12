@@ -545,7 +545,56 @@ body {
     margin: 12px 0;
 }
 
-/* Cursor blink */
+/* Message action buttons (edit / copy / delete) — visible on hover */
+.msg-actions {
+    display: flex;
+    gap: 2px;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.message.user:hover .msg-actions {
+    opacity: 1;
+}
+.msg-act-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: var(--text3);
+    transition: color 0.15s, background 0.15s;
+}
+.msg-act-btn:hover {
+    color: var(--text);
+    background: var(--surface2);
+}
+.msg-act-del:hover {
+    color: var(--error);
+}
+
+/* Inline edit textarea */
+.msg-edit-textarea {
+    width: 100%;
+    min-height: 48px;
+    padding: 10px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    margin-bottom: 6px;
+}
+.msg-edit-bar {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
 .cursor {
     display: inline-block;
     width: 2px;

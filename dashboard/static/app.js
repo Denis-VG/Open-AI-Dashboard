@@ -487,7 +487,7 @@ async function sendMessage() {
     document.getElementById('messages').style.display = 'flex';
 
     chatMessages.push({ role: 'user', content: text });
-    appendMessage({ role: 'user', content: text });
+    appendMessage({ role: 'user', content: text }, chatMessages.length - 1);
     scrollToBottom();
 
     var typingEl = document.createElement('div');
@@ -548,7 +548,7 @@ async function sendChatMessage(text, typingEl) {
                 try {
                     var data = JSON.parse(line.slice(6));
                     if (data.type === 'delta') {
-                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, true);
+                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
                         fullText += data.content;
                         updateStreamingMessage(aiMsgEl, fullText);
                         scrollToBottom();
@@ -673,7 +673,7 @@ async function sendAgentMessage(text, typingEl) {
                     } else if (data.type === 'agent_text') {
                         if (thinkingEl) finalizeThinkingEl(thinkingEl, thinkingCount);
                         fullText = data.content;
-                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, false);
+                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
                         finalizeMessage(aiMsgEl, fullText);
                         scrollToBottom();
                     } else if (data.type === 'agent_error') {
@@ -826,18 +826,27 @@ function abortStream() {
 }
 
 // ─── Message Rendering ──────────────────────────────────────────────────────
-function appendMessage(msg, streaming) {
+function appendMessage(msg, idx, streaming) {
     streaming = streaming || false;
     var el = document.createElement('div');
     el.className = 'message ' + msg.role;
+    if (idx !== undefined) el.setAttribute('data-index', idx);
     var isUser = msg.role === 'user';
     var contentHtml = isUser
         ? escHtml(msg.content).replace(/\n/g, '<br>')
         : renderMarkdown(msg.content) + (streaming ? '<span class="cursor"></span>' : '');
+    var actionsHtml = isUser ? (
+        '<div class="msg-actions">'
+        + '<button class="msg-act-btn" title="Copy" onclick="copyUserMessage(' + idx + ')">\uD83D\uDCCB</button>'
+        + '<button class="msg-act-btn" title="Edit" onclick="editUserMessage(' + idx + ')">\u270F\uFE0F</button>'
+        + '<button class="msg-act-btn msg-act-del" title="Delete" onclick="deleteUserMessage(' + idx + ')">\uD83D\uDDD1\uFE0F</button>'
+        + '</div>'
+    ) : '';
     el.innerHTML = '<div class="msg-avatar ' + (isUser ? 'user' : 'ai') + '">' + (isUser ? '\ud83d\udc64' : 'AI') + '</div>'
         + '<div class="msg-body">'
         + '<div class="msg-name">' + (isUser ? 'You' : 'Assistant') + '</div>'
         + '<div class="msg-bubble">' + contentHtml + '</div>'
+        + actionsHtml
         + '</div>';
     document.getElementById('messages').appendChild(el);
     return el;
@@ -863,8 +872,165 @@ function renderMessages(msgs) {
     el.style.display = 'flex';
     document.getElementById('welcomeScreen').style.display = 'none';
     el.innerHTML = '';
-    msgs.forEach(function (m) { appendMessage(m); });
+    msgs.forEach(function (m, i) { appendMessage(m, i); });
     scrollToBottom();
+}
+
+// ─── Message Actions (copy / edit / delete) ──────────────────────────────────
+
+function copyUserMessage(idx) {
+    var msg = chatMessages[idx];
+    if (!msg) return;
+    navigator.clipboard.writeText(msg.content).then(function () {
+        showToast('Copied to clipboard', 'success');
+    }).catch(function () {
+        showToast('Failed to copy', 'error');
+    });
+}
+
+function editUserMessage(idx) {
+    var el = document.querySelector('.message.user[data-index="' + idx + '"]');
+    if (!el) return;
+    var bubble = el.querySelector('.msg-bubble');
+    var actions = el.querySelector('.msg-actions');
+    var origText = chatMessages[idx].content;
+
+    // Replace bubble with textarea
+    bubble.style.display = 'none';
+    if (actions) actions.style.display = 'none';
+
+    var ta = document.createElement('textarea');
+    ta.className = 'msg-edit-textarea';
+    ta.value = origText;
+    ta.setAttribute('data-orig', origText);
+    ta.setAttribute('data-idx', idx);
+    ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') cancelEditUserMessage(idx);
+    });
+
+    var editBar = document.createElement('div');
+    editBar.className = 'msg-edit-bar';
+    editBar.innerHTML = '<button class="btn btn-sm btn-primary" onclick="saveEditUserMessage(' + idx + ')">Save & Resend</button>'
+        + '<button class="btn btn-sm btn-outline" onclick="cancelEditUserMessage(' + idx + ')">Cancel</button>';
+
+    bubble.parentNode.insertBefore(ta, bubble);
+    bubble.parentNode.insertBefore(editBar, bubble);
+    ta.focus();
+    autoResize(ta);
+    ta.addEventListener('input', function () { autoResize(ta); });
+}
+
+function cancelEditUserMessage(idx) {
+    var el = document.querySelector('.message.user[data-index="' + idx + '"]');
+    if (!el) return;
+    var bubble = el.querySelector('.msg-bubble');
+    var actions = el.querySelector('.msg-actions');
+    var ta = el.querySelector('.msg-edit-textarea');
+    var bar = el.querySelector('.msg-edit-bar');
+
+    bubble.style.display = '';
+    if (actions) actions.style.display = '';
+    if (ta) ta.remove();
+    if (bar) bar.remove();
+}
+
+async function saveEditUserMessage(idx) {
+    var el = document.querySelector('.message.user[data-index="' + idx + '"]');
+    if (!el) return;
+    var ta = el.querySelector('.msg-edit-textarea');
+    if (!ta) return;
+    var newText = ta.value.trim();
+    var origText = ta.getAttribute('data-orig');
+
+    if (!newText || newText === origText) {
+        cancelEditUserMessage(idx);
+        return;
+    }
+
+    // Truncate chatMessages: keep everything up to (idx - 1), then new text as user msg
+    chatMessages = chatMessages.slice(0, idx);
+    chatMessages.push({ role: 'user', content: newText });
+
+    // Re-render and resend (backend saves user + assistant reply atomically)
+    renderMessages(chatMessages);
+    loadChatList();
+    resendLastUserMessage();
+}
+
+async function deleteUserMessage(idx) {
+    if (!confirm('Delete this message and all subsequent replies?')) return;
+
+    // Truncate: keep messages up to but NOT including idx
+    chatMessages = chatMessages.slice(0, idx);
+
+    // Save to disk
+    if (currentChatId) {
+        try {
+            var existing = await fetch(API + '/api/chats/' + currentChatId).then(function (r) { return r.json(); });
+            if (existing && !existing.error) {
+                existing.messages = chatMessages.slice();
+                existing.updated = new Date().toISOString();
+                await fetch(API + '/api/chats/' + currentChatId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(existing)
+                });
+            }
+        } catch (e) {
+            console.error('deleteUserMessage save failed:', e);
+        }
+    }
+
+    if (!chatMessages.length) {
+        // All messages deleted — reset to welcome screen
+        currentChatId = null;
+        localStorage.removeItem('activeChatId');
+        document.getElementById('messages').innerHTML = '';
+        document.getElementById('messages').style.display = 'none';
+        document.getElementById('welcomeScreen').style.display = 'flex';
+        document.getElementById('topbarTitle').textContent = 'Portable AI';
+        resetMode();
+        loadChatList();
+    } else {
+        renderMessages(chatMessages);
+        loadChatList();
+    }
+    showToast('Messages deleted', 'success');
+}
+
+async function resendLastUserMessage() {
+    // The last message in chatMessages is the user text to send
+    // Remove the visual user msg we just rendered (it's already in chatMessages)
+    var input = document.getElementById('chatInput');
+    var lastText = chatMessages[chatMessages.length - 1].content;
+
+    // show welcome off, messages on
+    document.getElementById('welcomeScreen').style.display = 'none';
+    document.getElementById('messages').style.display = 'flex';
+
+    // Add typing indicator
+    var typingEl = document.createElement('div');
+    typingEl.className = 'message';
+    typingEl.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div></div>';
+    document.getElementById('messages').appendChild(typingEl);
+    scrollToBottom();
+
+    isStreaming = true;
+    userScrolled = false;
+    document.getElementById('sendBtn').style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'flex';
+
+    if (agentMode) {
+        await sendAgentMessage(lastText, typingEl);
+    } else {
+        await sendChatMessage(lastText, typingEl);
+    }
+
+    isStreaming = false;
+    streamController = null;
+    document.getElementById('sendBtn').style.display = 'flex';
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('chatInput').focus();
 }
 
 function scrollToBottom(force) {
