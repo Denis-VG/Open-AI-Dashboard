@@ -662,9 +662,12 @@ body {
 .agent-status.ready {
     background: var(--success);
 }
-.agent-status.thinking {
-    background: var(--accent);
-    animation: statusPulse 1s ease-in-out infinite;
+.agent-status.busy {
+    background: var(--warning);
+    animation: statusPulse 0.8s ease-in-out infinite;
+}
+.agent-status.error {
+    background: var(--error);
 }
 .agent-elapsed {
     font-size: 0.65rem;
@@ -673,8 +676,8 @@ body {
     font-variant-numeric: tabular-nums;
 }
 @keyframes statusPulse {
-    0%, 100% { opacity: 0.3; transform: scale(0.8); }
-    50% { opacity: 1; transform: scale(1.3); }
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
 }
 
 .mode-label {

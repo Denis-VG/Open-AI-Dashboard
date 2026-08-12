@@ -721,12 +721,14 @@ async function sendAgentMessage(text, typingEl) {
                         if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
                         lastReasoningEl = null;
                     } else if (data.type === 'agent_reasoning') {
+                        setAgentStatus('reasoning');
                         // Finalize previous, create new inline reasoning card
                         if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
                         lastReasoningEl = createReasoningCard(data.iteration, data.content);
                         document.getElementById('messages').appendChild(lastReasoningEl);
                         scrollToBottom();
                     } else if (data.type === 'tool_call') {
+                        setAgentStatus('exec');
                         // Finalize reasoning card so tool appears right after it
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         var card = createToolCard(data);
@@ -756,6 +758,7 @@ async function sendAgentMessage(text, typingEl) {
                         finalizeMessage(aiMsgEl, fullText);
                         scrollToBottom();
                     } else if (data.type === 'agent_error') {
+                        setAgentStatus('error');
                         if (lastReasoningEl) { lastReasoningEl.remove(); lastReasoningEl = null; }
                         var errMsg2 = '\u26a0\ufe0f Agent Error: ' + (data.error || 'Unknown error');
                         appendMessage({ role: 'assistant', content: errMsg2 });
@@ -906,24 +909,31 @@ function setAgentStatus(state) {
     // Clear any running timer
     if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
 
-    if (state === 'thinking') {
-        el.className = 'agent-status thinking';
-        el.title = 'Thinking...';
-        _statusStart = Date.now();
-        if (timeEl) {
-            timeEl.textContent = '0s';
-            timeEl.style.display = '';
-        }
-        _statusTimer = setInterval(function () {
-            var sec = ((Date.now() - _statusStart) / 1000).toFixed(1);
-            if (timeEl) timeEl.textContent = sec + 's';
-        }, 200);
-    } else {
+    var labels = { ready: 'Ready', thinking: 'Thinking', reasoning: 'Reasoning', exec: 'Exec', error: 'Error' };
+    var label = labels[state] || state;
+
+    if (state === 'ready') {
         el.className = 'agent-status ready';
         el.title = 'Ready';
+        if (timeEl) { timeEl.textContent = ''; timeEl.style.display = 'none'; }
+    } else if (state === 'error') {
+        el.className = 'agent-status error';
+        el.title = label;
         if (timeEl) {
-            timeEl.textContent = '';
-            timeEl.style.display = 'none';
+            timeEl.textContent = label;
+            timeEl.style.display = '';
+        }
+    } else {
+        // thinking / reasoning / exec — yellow pulsing, continuous timer
+        el.className = 'agent-status busy';
+        el.title = label;
+        if (!_statusStart) _statusStart = Date.now();
+        if (timeEl) timeEl.style.display = '';
+        if (!_statusTimer) {
+            _statusTimer = setInterval(function () {
+                var sec = ((Date.now() - _statusStart) / 1000).toFixed(1);
+                if (timeEl) timeEl.textContent = label + ' · ' + sec + 's';
+            }, 200);
         }
     }
 }
