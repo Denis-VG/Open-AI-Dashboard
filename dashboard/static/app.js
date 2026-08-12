@@ -490,25 +490,6 @@ async function sendMessage() {
     appendMessage({ role: 'user', content: text });
     scrollToBottom();
 
-    if (currentChatId) {
-        try {
-            var existing = await fetch(API + '/api/chats/' + currentChatId).then(function (r) { return r.json(); });
-            if (existing && !existing.error) {
-                existing.messages = existing.messages || [];
-                existing.messages.push({ role: 'user', content: text });
-                existing.updated = new Date().toISOString();
-                if (!existing.title || existing.title === 'New Conversation') existing.title = text.slice(0, 50);
-                await fetch(API + '/api/chats/' + currentChatId, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(existing)
-                }).catch(function () {});
-            }
-        } catch (e) {
-            console.error('sendMessage save failed:', e);
-        }
-    }
-
     var typingEl = document.createElement('div');
     typingEl.className = 'message';
     typingEl.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div></div>';
