@@ -141,6 +141,7 @@ class OpenAIProvider(AIProvider):
                         'content': message.get('content', ''),
                         'tool_calls': tool_calls,
                         'raw_message': message,
+                        'usage': data.get('usage', {}),
                     }
         except Exception as exc:
             log_api_error('openai', str(exc), payload,
@@ -178,7 +179,7 @@ class OpenAIProvider(AIProvider):
 # ── Anthropic ────────────────────────────────────────────────────────────────
 
 class AnthropicProvider(AIProvider):
-    """Anthropic Claude API."""
+    """Anthropic Claude API with prompt caching."""
 
     async def call(self, messages: list[dict], cfg: dict, include_tools: bool = True) -> dict:
         model = cfg.get('AI_DISPLAY_MODEL', 'claude-3-5-sonnet-20241022')
@@ -194,13 +195,24 @@ class AnthropicProvider(AIProvider):
             else:
                 filtered.append(m)
 
+        # Add cache_control to last user message
+        cached_filtered = [dict(m) for m in filtered]
+        if cached_filtered and cached_filtered[-1]['role'] == 'user':
+            last = cached_filtered[-1]
+            if isinstance(last.get('content'), str):
+                last['content'] = [{'type': 'text', 'text': last['content'], 'cache_control': {'type': 'ephemeral'}}]
+
         payload: dict[str, Any] = {
             'model': model,
-            'messages': filtered,
+            'messages': cached_filtered,
             'max_tokens': 4096,
         }
         if system:
-            payload['system'] = system
+            payload['system'] = [{
+                'type': 'text',
+                'text': system,
+                'cache_control': {'type': 'ephemeral'},
+            }]
         if include_tools:
             payload['tools'] = self._tools.for_anthropic()
 
@@ -208,6 +220,7 @@ class AnthropicProvider(AIProvider):
             'Content-Type': 'application/json',
             'x-api-key': api_key,
             'anthropic-version': '2023-06-01',
+            'anthropic-beta': 'prompt-caching-2024-07-31',
         }
 
         try:
@@ -239,6 +252,7 @@ class AnthropicProvider(AIProvider):
                             for tc in tool_parts
                         ],
                         'stop_reason': data.get('stop_reason'),
+                        'usage': data.get('usage', {}),
                     }
         except Exception as exc:
             log_api_error('anthropic', str(exc), payload,
@@ -349,6 +363,7 @@ class GeminiProvider(AIProvider):
                     return {
                         'content': '\n'.join(text_parts),
                         'tool_calls': tool_calls,
+                        'usage': data.get('usageMetadata', {}),
                     }
         except Exception as exc:
             # Log the payload + masked URL as request body

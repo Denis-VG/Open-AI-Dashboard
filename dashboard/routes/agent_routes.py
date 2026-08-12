@@ -42,6 +42,7 @@ def _save_assistant_reply(
     user_message: str,
     full_text: str,
     messages: list[dict] | None = None,
+    usage: dict | None = None,
 ) -> None:
     """Persist user + assistant messages into the chat.
 
@@ -57,6 +58,14 @@ def _save_assistant_reply(
     existing['updated'] = datetime.now().isoformat()
     if not existing.get('title') or existing['title'] == 'New Conversation':
         existing['title'] = user_message[:50]
+
+    # Accumulate token usage
+    if usage:
+        prev = existing.get('total_usage', {})
+        for key, val in usage.items():
+            prev[key] = prev.get(key, 0) + val
+        existing['total_usage'] = prev
+
     store.save(chat_id, existing)
 
 
@@ -89,11 +98,12 @@ async def _agent(req: Request) -> StreamResponse:
 
     loop = AgentLoop(provider, tools, approval, tools._work_dir)
     full_text = ''
+    total_usage = {}
 
     try:
-        full_text = await loop.run(all_messages, mode, sse.send)
+        full_text, total_usage = await loop.run(all_messages, mode, sse.send)
         if chat_id and full_text:
-            _save_assistant_reply(store, chat_id, user_message, full_text, messages)
+            _save_assistant_reply(store, chat_id, user_message, full_text, messages, total_usage)
     except Exception as e:
         # ❌ Do NOT save the error as an assistant reply — that creates a
         #    feedback loop where the model sees "⚠️ Agent Error: ..." as

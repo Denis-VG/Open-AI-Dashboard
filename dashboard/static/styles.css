@@ -406,6 +406,17 @@ body {
     font-size: 0.72rem;
 }
 
+/* Token bar (per-chat usage) */
+.token-bar {
+    padding: 6px 20px;
+    font-size: 0.72rem;
+    color: var(--text3);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 16px;
+}
+.token-bar .cache-hit { color: var(--success); }
+
 /* Messages */
 .messages {
     flex: 1;

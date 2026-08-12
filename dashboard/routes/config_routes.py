@@ -136,6 +136,47 @@ async def _system_prompt_post(req: Request) -> web.Response:
     return web.json_response({'success': True})
 
 
+# ── Project-level token usage ──────────────────────────────────────────
+
+async def _project_usage_get(req: Request) -> web.Response:
+    work_dir = req.app['work_dir']
+    path = os.path.join(work_dir, '.ai', 'total_usage.json')
+    if not os.path.exists(path):
+        return web.json_response({'total_tokens': 0})
+    try:
+        import json
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return web.json_response(data)
+    except Exception:
+        return web.json_response({'total_tokens': 0})
+
+
+async def _project_usage_post(req: Request) -> web.Response:
+    import json as _json
+    work_dir = req.app['work_dir']
+    usage = await req.json()
+    path = os.path.join(work_dir, '.ai', 'total_usage.json')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    existing = {}
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                existing = _json.load(f)
+        except Exception:
+            pass
+
+    for key, val in usage.items():
+        if isinstance(val, (int, float)):
+            existing[key] = existing.get(key, 0) + val
+
+    with open(path, 'w', encoding='utf-8') as f:
+        _json.dump(existing, f)
+
+    return web.json_response({'success': True})
+
+
 def register(app: web.Application) -> None:
     app.router.add_get('/api/config', _config_get)
     app.router.add_post('/api/config', _config_post)
@@ -145,6 +186,10 @@ def register(app: web.Application) -> None:
     # System prompt
     app.router.add_get('/api/system-prompt', _system_prompt_get)
     app.router.add_post('/api/system-prompt', _system_prompt_post)
+
+    # Project token usage
+    app.router.add_get('/api/project-usage', _project_usage_get)
+    app.router.add_post('/api/project-usage', _project_usage_post)
 
     # Profiles
     app.router.add_get('/api/profiles', _profiles_list)

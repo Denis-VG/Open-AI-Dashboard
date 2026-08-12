@@ -16,6 +16,7 @@ let userScrolled = false;
 let currentMode = 'normal';
 let agentMode = false;
 let workDir = '';
+let sessionUsage = {};
 
 const defaults = {
     gemini: 'gemini-2.0-pro-exp-02-05',
@@ -233,6 +234,7 @@ async function loadConfig() {
         console.error('loadConfig failed:', e);
     }
     loadSidebarInfo();
+    loadProjectUsage();
 }
 
 async function loadSidebarInfo() {
@@ -248,6 +250,90 @@ async function loadSidebarInfo() {
     } catch (e) {
         console.error('loadSidebarInfo failed:', e);
     }
+}
+
+// ─── Token Usage ─────────────────────────────────────────────────────────────
+function formatTokens(n) {
+    if (!n || n < 1000) return String(n || '—');
+    if (n < 1000000) return (n / 1000).toFixed(1) + 'k';
+    return (n / 1000000).toFixed(1) + 'M';
+}
+
+function extractCacheTokens(usage) {
+    return usage.cached_tokens
+        || usage.cache_read_input_tokens
+        || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens)
+        || (usage.promptTokensDetails && usage.promptTokensDetails.cachedTokens)
+        || 0;
+}
+
+function extractPromptTokens(usage) {
+    return usage.prompt_tokens || usage.promptTokenCount || 0;
+}
+
+function extractCompletionTokens(usage) {
+    return usage.completion_tokens || usage.candidatesTokenCount || 0;
+}
+
+function extractTotalTokens(usage) {
+    return usage.total_tokens || usage.totalTokenCount
+        || (extractPromptTokens(usage) + extractCompletionTokens(usage));
+}
+
+// Per-chat token bar (bottom of chat area)
+function updateTokenBar() {
+    var total = extractTotalTokens(sessionUsage);
+    var prompt = extractPromptTokens(sessionUsage);
+    var completion = extractCompletionTokens(sessionUsage);
+    var cached = extractCacheTokens(sessionUsage);
+    var cachePct = prompt > 0 ? Math.round(cached / prompt * 100) : 0;
+
+    var parts = ['Tokens: ' + formatTokens(total) + ' (' + formatTokens(prompt) + ' in / ' + formatTokens(completion) + ' out)'];
+    if (cachePct > 0) parts.push('Cache: ' + cachePct + '%');
+
+    var bar = document.getElementById('tokenBar');
+    bar.style.display = total > 0 ? 'flex' : 'none';
+    document.getElementById('tokenBarText').innerHTML = parts.join(' <span style="color:var(--border)">·</span> ');
+}
+
+// Sidebar: global usage across all chats
+async function loadProjectUsage() {
+    try {
+        var res = await fetch(API + '/api/project-usage');
+        var d = await res.json();
+        document.getElementById('sbTokens').textContent = formatTokens(d.total_tokens || 0);
+    } catch (e) {
+        console.error('loadProjectUsage failed:', e);
+    }
+}
+
+// Called after each SSE done event
+function updateTokenDisplay(usage) {
+    // Accumulate into session
+    for (var key in usage) {
+        if (typeof usage[key] === 'number') {
+            sessionUsage[key] = (sessionUsage[key] || 0) + usage[key];
+        }
+    }
+    updateTokenBar();
+    // Also save to global usage
+    saveProjectUsage(usage);
+}
+
+async function saveProjectUsage(usage) {
+    try {
+        await fetch(API + '/api/project-usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(usage)
+        });
+        loadProjectUsage();
+    } catch (e) { /* silent */ }
+}
+
+function resetSessionUsage() {
+    sessionUsage = {};
+    updateTokenBar();
 }
 
 // ─── Chat History List ──────────────────────────────────────────────────────
@@ -303,6 +389,11 @@ async function openChatById(id) {
             ? 'Ask agent to create files, run commands...'
             : 'Message AI...';
         if (isAgentChat) loadWorkDir();
+
+        // Restore token usage from chat
+        resetSessionUsage();
+        if (chat.total_usage) updateTokenDisplay(chat.total_usage);
+        else document.getElementById('sbTokens').textContent = '—';
 
         loadChatList();
         switchPage('chat');
@@ -369,6 +460,7 @@ async function startNewChat() {
         document.getElementById('welcomeScreen').style.display = 'flex';
         document.getElementById('topbarTitle').textContent = 'New Conversation';
         resetMode();
+        resetSessionUsage();
         loadChatList();
         switchPage('chat');
         document.getElementById('chatInput').focus();
@@ -556,6 +648,7 @@ async function sendChatMessage(text, typingEl) {
                         if (aiMsgEl) finalizeMessage(aiMsgEl, data.fullText || fullText);
                         fullText = data.fullText || fullText;
                         chatMessages.push({ role: 'assistant', content: fullText });
+                        if (data.usage) updateTokenDisplay(data.usage);
                         loadChatList();
                     } else if (data.type === 'error') {
                         typingEl.remove();
@@ -688,6 +781,7 @@ async function sendAgentMessage(text, typingEl) {
                             fullText = data.fullText;
                             chatMessages.push({ role: 'assistant', content: fullText });
                         }
+                        if (data.usage) updateTokenDisplay(data.usage);
                         loadChatList();
                     }
                 } catch (e) {

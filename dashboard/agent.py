@@ -95,7 +95,7 @@ class AgentLoop:
         messages: list[dict],
         mode: str,
         on_event: EventSink,
-    ) -> str:
+    ) -> tuple[str, dict[str, int]]:
         """Execute the agent loop.
 
         Parameters
@@ -110,19 +110,26 @@ class AgentLoop:
 
         Returns
         -------
-        str – the final text answer produced by the agent.
+        tuple[str, dict] – (final_text, total_usage)
         """
         # Inject system prompt
         self._inject_system(messages, mode)
 
         final_text = ''
+        total_usage: dict[str, int] = {}
 
         for iteration in range(MAX_ITERATIONS):
             await on_event({'type': 'agent_thinking', 'iteration': iteration + 1})
 
             ai_response = await self._call_ai_safely(messages, on_event, iteration)
             if ai_response is None:
-                return final_text  # error already reported by _call_ai_safely
+                return final_text, total_usage  # error already reported by _call_ai_safely
+
+            # ── accumulate usage ────────────────────────────────────────────
+            if ai_response.get('usage'):
+                for key, val in ai_response['usage'].items():
+                    if isinstance(val, (int, float)):
+                        total_usage[key] = total_usage.get(key, 0) + val
 
             # ── try to parse JSON tool-calls from text ───────────────────────
             self._extract_inline_tools(ai_response, on_event, iteration)
@@ -147,8 +154,12 @@ class AgentLoop:
                 await on_event({'type': 'agent_text', 'content': final_text})
             break
 
-        await on_event({'type': 'done', 'fullText': final_text})
-        return final_text
+        await on_event({
+            'type': 'done',
+            'fullText': final_text,
+            'usage': total_usage,
+        })
+        return final_text, total_usage
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

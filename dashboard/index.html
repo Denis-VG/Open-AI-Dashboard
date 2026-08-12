@@ -32,6 +32,7 @@
       <div class="info-row"><span class="info-label">Model</span><span class="info-val" id="sbModel">—</span></div>
       <div class="info-row"><span class="info-label">Git</span><span class="info-val" id="sbGit">—</span></div>
       <div class="info-row"><span class="info-label">Python</span><span class="info-val" id="sbPython">—</span></div>
+      <div class="info-row"><span class="info-label">Tokens</span><span class="info-val" id="sbTokens">—</span></div>
     </div>
   </aside>
 
@@ -74,6 +75,11 @@
 
       <!-- Messages -->
       <div class="messages" id="messages" style="display:none"></div>
+
+      <!-- Token Bar (per-chat) -->
+      <div class="token-bar" id="tokenBar" style="display:none">
+        <span id="tokenBarText">—</span>
+      </div>
 
       <!-- Workdir Bar (Agent mode) -->
       <div class="workdir-bar" id="workdirBar" style="display:none">
