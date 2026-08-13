@@ -8,13 +8,14 @@ pyvenv.cfg
 
 # === Конфиденциальные данные и Кэш приложения ===
 .app_data/
+data/
 CACHEDIR.TAG
 server_out.txt
 
 # === Специфичные файлы настроек проекта ===
 # Файлы запуска (.cmd)
-OpenClaudeWinDDK.cmd
-OpenClaudeWinSDK.cmd
+OpenAIDashboardDDK.cmd
+OpenAIDashboardSDK.cmd
 
 # Переменные окружения (Обязательно прятать, там могут быть API-ключи!)
 data/ai_settings.env
