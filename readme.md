@@ -1,4 +1,4 @@
-# OpenClaude Dashboard (Python)
+# Open AI Dashboard (Python)
 
 [English](#english) | [Русский](#русский)
 
