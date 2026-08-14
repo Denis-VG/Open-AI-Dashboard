@@ -47,7 +47,7 @@ Required packages (see `requirements.txt`):
 - **Inline reasoning cards** — agent thoughts appear right before each tool call, not stuck at the top; approval buttons always visible
 - **Agent status indicator** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec with elapsed timer
 - **Chat attachments** — attach files to a message (text attachments up to 200 KB each); stored separately so conversation history shows links, not inline content
-- **@-mentions** — type `@` in the agent input to autocomplete files and folders from the working directory
+- **@-mentions** — type `@` in the agent input to autocomplete files and folders from the working directory; dot-directories (`.github`, `.vscode`) appear in suggestions, while dot-files (`.env`, `.gitignore`) and `.git` are always hidden
 - **Code-block copy & download** — one-click copy or save buttons on code blocks in assistant replies
 - **Editable chat titles** — rename conversations inline; date/time shown in the conversation list
 - **Collapsible reasoning** — collapse agent reasoning into a compact toggle
@@ -127,7 +127,7 @@ pip install -r requirements.txt
 - **Inline-карточки рассуждений** — мысли агента перед каждым действием, а не вверху; кнопки подтверждения всегда видны
 - **Индикатор статуса агента** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec с таймером
 - **Вложения в чат** — прикрепляйте файлы к сообщению (текстовые вложения до 200 КБ); хранятся отдельно, поэтому в истории чата показываются ссылки, а не инлайн-содержимое
-- **@-упоминания** — ввод `@` в поле агента подставляет файлы и папки рабочей директории (автодополнение)
+- **@-упоминания** — ввод `@` в поле агента подставляет файлы и папки рабочей директории (автодополнение); dot-папки (`.github`, `.vscode`) показываются, а dot-файлы (`.env`, `.gitignore`) и `.git` всегда скрыты
 - **Копирование и скачивание кода** — кнопки копирования/сохранения на блоках кода в ответах ассистента
 - **Редактируемые заголовки чатов** — переименование диалогов на месте; дата/время в списке диалогов
 - **Сворачиваемые рассуждения** — сворачивание блока рассуждений агента в компактный переключатель

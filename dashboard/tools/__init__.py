@@ -219,8 +219,6 @@ class ToolRegistry:
 
         entries: list[dict] = []
         for name in names:
-            if name.startswith('.'):
-                continue
             p = os.path.join(full, name)
             try:
                 isdir = os.path.isdir(p)
@@ -228,6 +226,10 @@ class ToolRegistry:
             except OSError:
                 continue
             if not (isdir or isfile):
+                continue
+            # Always hide .git; keep dot-files (e.g. .env, .gitignore) hidden,
+            # but show dot-directories (e.g. .github, .vscode) in @-autocomplete.
+            if name.startswith('.') and (name == '.git' or not isdir):
                 continue
             rel = os.path.relpath(p, self._work_dir).replace(os.sep, '/')
             entries.append({
