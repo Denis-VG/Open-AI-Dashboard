@@ -3,6 +3,7 @@ Agent & chat endpoints — the core SSE streaming routes plus
 workdir, launch, and approval callbacks.
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -34,6 +35,46 @@ def _sse_response() -> StreamResponse:
             'Access-Control-Allow-Origin': '*',
         },
     )
+
+
+def _friendly_error(exc: Exception) -> str:
+    """Return a user-facing error message.
+
+    Some exceptions (e.g. timeouts) have an empty ``str(exc)`` — without
+    this the UI would show a bare "Error:" with no explanation.
+    """
+    if isinstance(exc, TimeoutError):
+        return (
+            'Request timed out — the AI provider did not respond in time. '
+            'Please try again.'
+        )
+    return str(exc) or type(exc).__name__ or 'Unknown error'
+
+
+async def _run_guarded(sse: SSEWriter, coro) -> object:
+    """Run *coro* as a task, cancelling it if the client disconnects.
+
+    Returns the task's result on normal completion, ``None`` if it was
+    cancelled (client stopped the request). Exceptions from *coro* are
+    propagated to the caller.
+    """
+    task = asyncio.create_task(coro)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=3)
+            if done:
+                break
+            await sse.ping()
+            if sse.closed:
+                task.cancel()
+                break
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+    try:
+        return await task
+    except asyncio.CancelledError:
+        return None
 
 
 def _save_assistant_reply(
@@ -100,16 +141,21 @@ async def _agent(req: Request) -> StreamResponse:
     full_text = ''
     total_usage = {}
 
-    try:
+    async def work():
+        nonlocal full_text, total_usage
         full_text, total_usage = await loop.run(all_messages, mode, sse.send)
-        if chat_id and full_text:
-            _save_assistant_reply(store, chat_id, user_message, full_text, messages, total_usage)
+
+    try:
+        await _run_guarded(sse, work())
     except Exception as e:
         # ❌ Do NOT save the error as an assistant reply — that creates a
         #    feedback loop where the model sees "⚠️ Agent Error: ..." as
         #    its own reply, and on next request the user message is repeated,
         #    creating an ever-growing error chain.
-        await sse.send({'type': 'agent_error', 'error': str(e)})
+        await sse.send({'type': 'agent_error', 'error': _friendly_error(e)})
+
+    if chat_id and full_text:
+        _save_assistant_reply(store, chat_id, user_message, full_text, messages, total_usage)
 
     await sse.close()
     return resp
@@ -142,16 +188,23 @@ async def _chat(req: Request) -> StreamResponse:
     all_messages = [{'role': 'system', 'content': sys_content}] + history + [{'role': 'user', 'content': user_message}]
 
     full_text = ''
-    try:
-        full_text = await _stream_chat(all_messages, cfg, sse)
-    except Exception as e:
-        await sse.send({'type': 'error', 'content': str(e)})
-    finally:
-        if full_text:
-            await sse.send({'type': 'done', 'fullText': full_text})
-        await sse.close()
+    error_occurred = False
 
-    if chat_id and full_text:
+    async def work():
+        nonlocal full_text, error_occurred
+        try:
+            full_text = await _stream_chat(all_messages, cfg, sse)
+        except Exception as e:
+            error_occurred = True
+            await sse.send({'type': 'error', 'content': _friendly_error(e)})
+
+    await _run_guarded(sse, work())
+
+    if full_text and not error_occurred:
+        await sse.send({'type': 'done', 'fullText': full_text})
+    await sse.close()
+
+    if chat_id and full_text and not error_occurred:
         store: ChatStore = req.app['chat_store']
         _save_assistant_reply(store, chat_id, user_message, full_text, messages)
 
@@ -163,7 +216,7 @@ async def _chat(req: Request) -> StreamResponse:
 async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
     """Stream a chat completion through SSE, returning the full text."""
     import re as _re
-    from aiohttp import ClientSession
+    from aiohttp import ClientSession, ClientTimeout
 
     provider = cfg.get('AI_PROVIDER')
     model = cfg.get('OPENAI_MODEL') or cfg.get('AI_DISPLAY_MODEL')
@@ -185,7 +238,8 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
             full_text = ''
             async with ClientSession() as session:
                 async with session.post(
-                    f'{base_url}/chat/completions', json=payload, headers=headers, timeout=60
+                    f'{base_url}/chat/completions', json=payload, headers=headers,
+                    timeout=ClientTimeout(total=None, connect=15, sock_read=60)
                 ) as resp:
                     if resp.status != 200:
                         error_body = await resp.text()
@@ -199,7 +253,11 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                             continue
                         try:
                             parsed = json.loads(raw)
-                            delta = parsed.get('choices', [{}])[0].get('delta', {}).get('content', '')
+                            delta_obj = parsed.get('choices', [{}])[0].get('delta', {})
+                            reasoning = delta_obj.get('reasoning_content') or delta_obj.get('reasoning') or ''
+                            if reasoning:
+                                await sse.send({'type': 'reasoning', 'content': reasoning})
+                            delta = delta_obj.get('content', '')
                             if delta:
                                 full_text += delta
                                 await sse.send({'type': 'delta', 'content': delta})
@@ -207,7 +265,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                             pass
             return full_text
         except Exception as exc:
-            log_api_error(provider, str(exc), payload, None)
+            log_api_error(provider, str(exc) or type(exc).__name__ or 'Unknown error', payload, None)
             raise
 
     # ── Anthropic ──
@@ -228,7 +286,8 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
             full_text = ''
             async with ClientSession() as session:
                 async with session.post(
-                    'https://api.anthropic.com/v1/messages', json=payload, headers=headers, timeout=60
+                    'https://api.anthropic.com/v1/messages', json=payload, headers=headers,
+                    timeout=ClientTimeout(total=None, connect=15, sock_read=60)
                 ) as resp:
                     if resp.status != 200:
                         error_body = await resp.text()
@@ -247,7 +306,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                             pass
             return full_text
         except Exception as exc:
-            log_api_error('anthropic', str(exc), payload, None)
+            log_api_error('anthropic', str(exc) or type(exc).__name__ or 'Unknown error', payload, None)
             raise
 
     # ── Gemini ──
@@ -270,7 +329,8 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
         try:
             full_text = ''
             async with ClientSession() as session:
-                async with session.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=60) as resp:
+                async with session.post(url, json=payload, headers={'Content-Type': 'application/json'},
+                                        timeout=ClientTimeout(total=None, connect=15, sock_read=60)) as resp:
                     if resp.status != 200:
                         error_body = await resp.text()
                         raise Exception(f'Gemini API Error: status {resp.status}, body: {error_body[:1000]}')
@@ -284,7 +344,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                                 await sse.send({'type': 'delta', 'content': text})
             return full_text
         except Exception as exc:
-            log_api_error('gemini', str(exc),
+            log_api_error('gemini', str(exc) or type(exc).__name__ or 'Unknown error',
                           {'url': safe_url, 'payload': payload}, None)
             raise
 
@@ -320,6 +380,17 @@ async def _workdir_post(req: Request) -> web.Response:
     tools: ToolRegistry = req.app['tool_registry']
     tools._work_dir = abs_path
     return web.json_response({'success': True, 'workDir': abs_path})
+
+
+# ── files (listing inside work_dir, for @-mention autocomplete) ──────────────
+
+async def _files_get(req: Request) -> web.Response:
+    tools: ToolRegistry = req.app['tool_registry']
+    path = (req.query.get('path') or '.').strip() or '.'
+    result = tools.list_files(path)
+    if not result.get('ok'):
+        return web.json_response({'success': False, 'error': result.get('error')}, status=400)
+    return web.json_response({'success': True, 'entries': result['entries']})
 
 
 # ── launch ───────────────────────────────────────────────────────────────────
@@ -359,4 +430,5 @@ def register(app: web.Application) -> None:
     app.router.add_post('/api/agent/approve', _agent_approve)
     app.router.add_get('/api/workdir', _workdir_get)
     app.router.add_post('/api/workdir', _workdir_post)
+    app.router.add_get('/api/files', _files_get)
     app.router.add_post('/api/launch', _launch)

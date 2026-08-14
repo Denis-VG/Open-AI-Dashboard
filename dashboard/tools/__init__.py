@@ -197,6 +197,48 @@ class ToolRegistry:
             )
         return candidate
 
+    def list_files(self, rel_path: str = '.') -> dict:
+        """List files/dirs inside the working directory (confined).
+
+        Returns ``{'ok': True, 'entries': [...]}`` or ``{'ok': False, 'error': ...}``.
+        Each entry is ``{'name', 'type' ('file'|'dir'), 'path'}`` where *path* is
+        relative to the working directory and uses forward slashes.
+        """
+        try:
+            full = self.resolve_path(rel_path or '.')
+        except PathOutsideWorkDirError as exc:
+            return {'ok': False, 'error': str(exc)}
+
+        if not os.path.isdir(full):
+            return {'ok': False, 'error': f'Not a directory: {rel_path}'}
+
+        try:
+            names = sorted(os.listdir(full))
+        except OSError as exc:
+            return {'ok': False, 'error': str(exc)}
+
+        entries: list[dict] = []
+        for name in names:
+            if name.startswith('.'):
+                continue
+            p = os.path.join(full, name)
+            try:
+                isdir = os.path.isdir(p)
+                isfile = os.path.isfile(p)
+            except OSError:
+                continue
+            if not (isdir or isfile):
+                continue
+            rel = os.path.relpath(p, self._work_dir).replace(os.sep, '/')
+            entries.append({
+                'name': name,
+                'type': 'dir' if isdir else 'file',
+                'path': rel,
+            })
+
+        entries.sort(key=lambda e: (0 if e['type'] == 'dir' else 1, e['name'].lower()))
+        return {'ok': True, 'entries': entries[:500]}
+
     # ── definitions ────────────────────────────────────────────────
 
     @property

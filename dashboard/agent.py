@@ -133,11 +133,13 @@ class AgentLoop:
             # ── try to parse JSON tool-calls from text ───────────────────────
             self._extract_inline_tools(ai_response, on_event, iteration)
 
-            # Emit reasoning if both text and tools are present
-            if ai_response.get('content') and ai_response.get('tool_calls'):
+            # Emit reasoning: DeepSeek-style reasoning_content, or model text
+            # alongside tool calls (both signal the model's thinking).
+            reasoning = ai_response.get('reasoning') or ''
+            if reasoning.strip() or (ai_response.get('content') and ai_response.get('tool_calls')):
                 await on_event({
                     'type': 'agent_reasoning',
-                    'content': ai_response['content'],
+                    'content': reasoning.strip() or ai_response.get('content', ''),
                     'iteration': iteration + 1,
                 })
 

@@ -25,7 +25,9 @@ from ..error_logger import log_api_error
 logger = logging.getLogger(__name__)
 
 # Default timeout for AI API calls (seconds)
-_API_TIMEOUT = 60
+# Reasoning models (e.g. DeepSeek) can think for a couple of minutes before
+# producing the first token, so a short total timeout truncates valid runs.
+_API_TIMEOUT = 300
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -139,6 +141,7 @@ class OpenAIProvider(AIProvider):
 
                     return {
                         'content': message.get('content', ''),
+                        'reasoning': message.get('reasoning_content') or message.get('reasoning') or '',
                         'tool_calls': tool_calls,
                         'raw_message': message,
                         'usage': data.get('usage', {}),
