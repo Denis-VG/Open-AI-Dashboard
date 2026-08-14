@@ -142,6 +142,10 @@ DANGEROUS_TOOLS = WRITE_TOOLS | EXEC_TOOLS
 
 # ── ToolRegistry ──────────────────────────────────────────────────
 
+class PathOutsideWorkDirError(ValueError):
+    """Raised when a tool-supplied path escapes the working directory."""
+
+
 class ToolRegistry:
     """Holds tool definitions and executes tool calls with path safety."""
 
@@ -152,11 +156,46 @@ class ToolRegistry:
 
     # ── path resolution ───────────────────────────────────────────
 
+    @staticmethod
+    def _is_within(root: str, candidate: str) -> bool:
+        """Return True if *candidate* is *root* or a path inside it.
+
+        Comparison is case-insensitive on Windows (via ``normcase``) and
+        follows symlinks (via ``realpath``), so a symlink pointing outside
+        the working directory is rejected just like a literal ``..`` step.
+        """
+        root_n = os.path.normcase(os.path.realpath(root))
+        cand_n = os.path.normcase(os.path.realpath(candidate))
+        if cand_n == root_n:
+            return True
+        prefix = root_n + os.sep if not root_n.endswith(os.sep) else root_n
+        return cand_n.startswith(prefix)
+
     def resolve_path(self, rel_path: str) -> str:
-        """Convert a tool-supplied relative path to a safe absolute path."""
+        """Convert a tool-supplied path to a safe absolute path inside the
+        working directory.
+
+        Rejects absolute paths outside the working directory, ``..``
+        traversal, and symlinks that resolve outside it. Raises
+        :class:`PathOutsideWorkDirError` on any escape attempt.
+        """
+        if not isinstance(rel_path, str) or not rel_path.strip():
+            raise PathOutsideWorkDirError('Path must be a non-empty string')
+
+        root = os.path.realpath(self._work_dir)
         if os.path.isabs(rel_path):
-            return os.path.realpath(os.path.normpath(rel_path))
-        return os.path.realpath(os.path.normpath(os.path.join(self._work_dir, rel_path)))
+            candidate = os.path.realpath(os.path.normpath(rel_path))
+        else:
+            candidate = os.path.realpath(
+                os.path.normpath(os.path.join(self._work_dir, rel_path))
+            )
+
+        if not self._is_within(root, candidate):
+            raise PathOutsideWorkDirError(
+                f'Path escapes working directory: {rel_path!r} '
+                f'(resolved to {candidate!r})'
+            )
+        return candidate
 
     # ── definitions ────────────────────────────────────────────────
 
