@@ -41,22 +41,42 @@ Required packages (see `requirements.txt`):
 - **Custom system prompt** — Setup tab: define your own agent rules (leave blank for defaults)
 - **Multiple AI providers** — OpenAI, Anthropic, Gemini, DeepSeek, Ollama, LM Studio, OpenRouter, NVIDIA NIM
 - **Configuration profiles** — save and switch between provider setups
-- **Token usage tracking** — per-chat bar: `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; global project stats in sidebar `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; global project stats in sidebar
+- **Token usage tracking** — per-chat bar: `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; global project stats in sidebar
 - **Prompt caching** — Anthropic (explicit cache control) & DeepSeek (native); cache hit % in token bar
 - **Project instructions** — Setup tab: append project-specific rules to system prompt (stored in `.ai/project_prompt.txt`)
 - **Inline reasoning cards** — agent thoughts appear right before each tool call, not stuck at the top; approval buttons always visible
 - **Agent status indicator** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec with elapsed timer
+- **Chat attachments** — attach files to a message (text attachments up to 200 KB each); stored separately so conversation history shows links, not inline content
+- **@-mentions** — type `@` in the agent input to autocomplete files and folders from the working directory
+- **Code-block copy & download** — one-click copy or save buttons on code blocks in assistant replies
+- **Editable chat titles** — rename conversations inline; date/time shown in the conversation list
+- **Collapsible reasoning** — collapse agent reasoning into a compact toggle
+- **DeepSeek reasoning support** — `reasoning_content` rendered for DeepSeek reasoning models; extended API timeout (up to 5 min) so long thinking runs aren't cut off
+- **Request cancellation** — stop an in-flight stream at any time
+- **File listing tool** — agent can list files/dirs inside the working directory
+- **Strict path confinement** — tool access is confined to the working directory (`..` traversal and symlink escapes blocked)
+- **Resilience fixes** — user messages persist even when the assistant reply fails; Save & Resend works even when the text is unchanged; non-numeric usage fields are skipped safely
 
-### ⚠️ Alpha Status
+### ⚠️ Beta Status
 
-**This is an early alpha release.** Please be aware that:
+**This is a beta release.** Please be aware that:
 
-- Core features preserved, new capabilities added
-- Bugs may still be present and not all edge cases have been tested
-- APIs and interfaces may change without notice
+- Core features are stable and well tested
+- Some edge cases may still exist
+- APIs and interfaces may change, but less frequently than in alpha
 - Use at your own risk in production environments
 
 Contributions, bug reports, and feedback are welcome!
+
+### ⚠️ Limitless Agent Mode — Sandbox Required
+
+In **agent mode with the Limitless setting** the agent can execute shell commands and file operations **without approval**. It is **strictly recommended to run it only inside a sandbox or virtual machine**:
+
+- LLMs can hallucinate or misinterpret input, producing destructive commands (deleting files, overwriting data, etc.)
+- The agent has access to the working directory and can modify the files of the system and working prompts (`system prompt`, `.ai/project_prompt.txt`, etc.)
+- Incorrect or malformed user input can lead to unintended side effects
+
+Never run Limitless agent mode on your main machine with important data.
 
 ### License
 
@@ -106,17 +126,37 @@ pip install -r requirements.txt
 - **Инструкции проекта** — вкладка Setup: добавление правил проекта в system prompt (файл `.ai/project_prompt.txt`)
 - **Inline-карточки рассуждений** — мысли агента перед каждым действием, а не вверху; кнопки подтверждения всегда видны
 - **Индикатор статуса агента** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec с таймером
+- **Вложения в чат** — прикрепляйте файлы к сообщению (текстовые вложения до 200 КБ); хранятся отдельно, поэтому в истории чата показываются ссылки, а не инлайн-содержимое
+- **@-упоминания** — ввод `@` в поле агента подставляет файлы и папки рабочей директории (автодополнение)
+- **Копирование и скачивание кода** — кнопки копирования/сохранения на блоках кода в ответах ассистента
+- **Редактируемые заголовки чатов** — переименование диалогов на месте; дата/время в списке диалогов
+- **Сворачиваемые рассуждения** — сворачивание блока рассуждений агента в компактный переключатель
+- **Поддержка DeepSeek reasoning** — вывод `reasoning_content` для reasoning-моделей DeepSeek; увеличенный таймаут API (до 5 минут), чтобы длинные размышления не обрывались
+- **Отмена запроса** — остановка активного стрима в любой момент
+- **Инструмент листинга файлов** — агент может выводить список файлов/папок внутри рабочей директории
+- **Строгое ограничение путей** — доступ инструментов ограничен рабочей директорией (обходы через `..` и симлинки блокируется)
+- **Фиксы надёжности** — сообщение пользователя сохраняется, даже если ответ ассистента не удался; Save & Resend работает даже при неизменном тексте; некорректные поля usage безопасно пропускаются
 
-### ⚠️ Статус Альфа
+### ⚠️ Статус Бета
 
-**Это ранняя альфа-версия.** Пожалуйста, учитывайте, что:
+**Это бета-версия.** Пожалуйста, учитывайте, что:
 
-- Основные функции сохранены, добавлены новые возможности
-- Могут присутствовать баги, и не все сценарии использования протестированы
-- API и интерфейсы могут изменяться без предупреждения
+- Основные функции стабильны и протестированы
+- Отдельные краевые случаи могут ещё встречаться
+- API и интерфейсы могут меняться, но реже, чем в альфа-версии
 - Использование в production-среде — на ваш страх и риск
 
 Приветствуются участие в разработке, баг-репорты и обратная связь!
+
+### ⚠️ Режим агента Limitless — требуется песочница
+
+В **режиме агента с настройкой Limitless** агент может выполнять shell-команды и файловые операции **без подтверждения**. **Строго рекомендуется запускать его только внутри песочницы или виртуальной машины**:
+
+- LLM могут галлюцинировать или неверно интерпретировать ввод, что приводит к разрушительным командам (удаление файлов, перезапись данных и т.п.)
+- Агент имеет доступ к рабочей директории и может изменять файлы системного и рабочего промтов (`system prompt`, `.ai/project_prompt.txt` и др.)
+- Некорректный или повреждённый ввод пользователя может привести к непреднамеренным побочным эффектам
+
+Никогда не запускайте режим агента Limitless на основной машине с важными данными.
 
 ### Лицензия
 
