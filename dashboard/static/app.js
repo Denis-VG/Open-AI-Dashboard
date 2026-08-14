@@ -1025,9 +1025,32 @@ function updateChatBubble(el, reasoning, answer, streaming) {
     var bubble = el.querySelector('.msg-bubble');
     if (!bubble) return;
     var html = '';
-    if (reasoning) html += '<div class="chat-reasoning">' + escHtml(reasoning).replace(/\n/g, '<br>') + '</div>';
+    if (reasoning) {
+        var collapsed = !!answer && el.dataset.reasoningOpen !== '1';
+        html += '<div class="chat-reasoning' + (collapsed ? ' collapsed' : '') + '">'
+            + '<div class="chat-reasoning-head" onclick="toggleChatReasoning(this)">'
+            + '\uD83D\uDCAD Reasoning <span class="chat-reasoning-caret">' + (collapsed ? '\u25B8' : '\u25BE') + '</span>'
+            + '</div>'
+            + '<div class="chat-reasoning-body">' + escHtml(reasoning).replace(/\n/g, '<br>') + '</div>'
+            + '</div>';
+    }
     if (answer) html += renderMarkdown(answer);
     bubble.innerHTML = html + (streaming ? '<span class="cursor"></span>' : '');
+    var box = bubble.querySelector('.chat-reasoning');
+    if (box) {
+        var body = box.querySelector('.chat-reasoning-body');
+        if (body && !box.classList.contains('collapsed')) body.scrollTop = body.scrollHeight;
+    }
+}
+
+function toggleChatReasoning(head) {
+    var box = head.closest('.chat-reasoning');
+    if (!box) return;
+    var collapsed = box.classList.toggle('collapsed');
+    var caret = box.querySelector('.chat-reasoning-caret');
+    if (caret) caret.textContent = collapsed ? '\u25B8' : '\u25BE';
+    var msgEl = box.closest('.message');
+    if (msgEl) msgEl.dataset.reasoningOpen = collapsed ? '0' : '1';
 }
 
 function finalizeMessage(el, text) {
