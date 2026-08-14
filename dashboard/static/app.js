@@ -9,6 +9,7 @@ let cfg = {};
 let currentChatId = null;
 let chatMessages = [];
 let isStreaming = false;
+let streamError = false;
 let allModels = [];
 let setupState = { provider: '', key: '', model: '', tier: 'free', baseUrl: '' };
 let streamController = null;
@@ -17,6 +18,11 @@ let currentMode = 'normal';
 let agentMode = false;
 let workDir = '';
 let sessionUsage = {};
+let pendingAttachments = [];
+let mentionMenu = null;
+let mentionItems = [];
+let mentionActive = -1;
+const MAX_ATTACH_SIZE = 200 * 1024; // 200 KB per text attachment
 
 const defaults = {
     gemini: 'gemini-2.0-pro-exp-02-05',
@@ -395,6 +401,8 @@ async function openChatById(id) {
         document.getElementById('chatInput').placeholder = isAgentChat
             ? 'Ask agent to create files, run commands...'
             : 'Message AI...';
+        updateInputToolbar();
+        updateModeToggle();
         if (isAgentChat) loadWorkDir();
 
         // Restore token usage from chat
@@ -496,6 +504,8 @@ async function toggleAgent(enabled) {
     document.getElementById('chatInput').placeholder = enabled
         ? 'Ask agent to create files, run commands...'
         : 'Message AI...';
+    updateInputToolbar();
+    updateModeToggle();
     if (enabled) loadWorkDir();
 
     // Persist mode change to current chat and refresh sidebar badges
@@ -553,6 +563,14 @@ async function changeWorkDir() {
 
 // ─── Chat Sending ───────────────────────────────────────────────────────────
 function handleKey(e) {
+    if (mentionMenu) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); moveMention(1); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); moveMention(-1); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+            if (mentionItems.length) { e.preventDefault(); chooseMention(mentionActive); return; }
+        }
+        if (e.key === 'Escape') { e.preventDefault(); closeMentionMenu(); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
 
@@ -568,9 +586,10 @@ function sendSuggestion(text) {
 
 async function sendMessage() {
     if (isStreaming) return;
+    streamError = false;
     var input = document.getElementById('chatInput');
     var text = input.value.trim();
-    if (!text) return;
+    if (!text && !pendingAttachments.length) return;
     if (!cfg.AI_PROVIDER) {
         showToast('Please configure a provider first', 'error');
         switchPage('setup');
@@ -579,6 +598,15 @@ async function sendMessage() {
 
     if (!currentChatId) await startNewChat();
 
+    var userMsg = { role: 'user', content: text };
+    if (pendingAttachments.length) {
+        userMsg.attachments = pendingAttachments.map(function (a) {
+            return { name: a.name, content: a.content, size: a.size };
+        });
+    }
+    pendingAttachments = [];
+    renderAttachList();
+
     setAgentStatus('thinking');
     input.value = '';
     input.style.height = 'auto';
@@ -586,8 +614,8 @@ async function sendMessage() {
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('messages').style.display = 'flex';
 
-    chatMessages.push({ role: 'user', content: text });
-    appendMessage({ role: 'user', content: text }, chatMessages.length - 1);
+    chatMessages.push(userMsg);
+    appendMessage(userMsg, chatMessages.length - 1);
     scrollToBottom();
 
     var typingEl = document.createElement('div');
@@ -602,13 +630,13 @@ async function sendMessage() {
     document.getElementById('stopBtn').style.display = 'flex';
 
     if (agentMode) {
-        await sendAgentMessage(text, typingEl);
+        await sendAgentMessage(composeAgentContent(text), typingEl);
     } else {
-        await sendChatMessage(text, typingEl);
+        await sendChatMessage(composeUserContent(text, userMsg.attachments || []), typingEl);
     }
 
     isStreaming = false;
-    setAgentStatus('ready');
+    setAgentStatus(streamError ? 'error' : 'ready');
     streamController = null;
     document.getElementById('sendBtn').style.display = 'flex';
     document.getElementById('stopBtn').style.display = 'none';
@@ -619,6 +647,7 @@ async function sendMessage() {
 async function sendChatMessage(text, typingEl) {
     var aiMsgEl = null;
     var fullText = '';
+    var reasoningText = '';
     try {
         streamController = new AbortController();
         var res = await fetch(API + '/api/chat', {
@@ -648,22 +677,30 @@ async function sendChatMessage(text, typingEl) {
                 if (line.indexOf('data: ') !== 0) continue;
                 try {
                     var data = JSON.parse(line.slice(6));
-                    if (data.type === 'delta') {
+                    if (data.type === 'reasoning') {
+                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
+                        reasoningText += data.content;
+                        updateChatBubble(aiMsgEl, reasoningText, fullText, true);
+                        scrollToBottom();
+                    } else if (data.type === 'delta') {
                         if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
                         fullText += data.content;
-                        updateStreamingMessage(aiMsgEl, fullText);
+                        updateChatBubble(aiMsgEl, reasoningText, fullText, true);
                         scrollToBottom();
                     } else if (data.type === 'done') {
-                        if (aiMsgEl) finalizeMessage(aiMsgEl, data.fullText || fullText);
+                        if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, data.fullText || fullText, false);
                         fullText = data.fullText || fullText;
-                        chatMessages.push({ role: 'assistant', content: fullText });
+                        pushAssistantMessage(fullText, aiMsgEl);
                         if (data.usage) updateTokenDisplay(data.usage);
                         loadChatList();
                     } else if (data.type === 'error') {
+                        streamError = true;
+                        setAgentStatus('error');
                         typingEl.remove();
-                        var errMsg = '\u26a0\ufe0f Error: ' + data.content;
-                        appendMessage({ role: 'assistant', content: errMsg });
-                        chatMessages.push({ role: 'assistant', content: errMsg });
+                        if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, fullText, false);
+                        var errMsg = '\u26a0\ufe0f Error: ' + (data.content || 'Unknown error');
+                        var errEl = appendMessage({ role: 'assistant', content: errMsg });
+                        pushAssistantMessage(errMsg, errEl);
                         loadChatList();
                     }
                 } catch (e) {
@@ -673,8 +710,8 @@ async function sendChatMessage(text, typingEl) {
         }
     } catch (err) {
         if (err.name === 'AbortError') {
-            if (aiMsgEl) finalizeMessage(aiMsgEl, fullText || '*(stopped)*');
-            if (fullText) chatMessages.push({ role: 'assistant', content: fullText });
+            if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, fullText || '*(stopped)*', false);
+            if (fullText) pushAssistantMessage(fullText, aiMsgEl);
         } else {
             typingEl.remove();
             appendMessage({ role: 'assistant', content: '\u26a0\ufe0f Error: ' + err.message });
@@ -758,17 +795,18 @@ async function sendAgentMessage(text, typingEl) {
                         finalizeMessage(aiMsgEl, fullText);
                         scrollToBottom();
                     } else if (data.type === 'agent_error') {
+                        streamError = true;
                         setAgentStatus('error');
                         if (lastReasoningEl) { lastReasoningEl.remove(); lastReasoningEl = null; }
                         var errMsg2 = '\u26a0\ufe0f Agent Error: ' + (data.error || 'Unknown error');
-                        appendMessage({ role: 'assistant', content: errMsg2 });
-                        chatMessages.push({ role: 'assistant', content: errMsg2 });
+                        var errEl2 = appendMessage({ role: 'assistant', content: errMsg2 });
+                        pushAssistantMessage(errMsg2, errEl2);
                         loadChatList();
                     } else if (data.type === 'done') {
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         if (data.fullText) {
                             fullText = data.fullText;
-                            chatMessages.push({ role: 'assistant', content: fullText });
+                            pushAssistantMessage(fullText, aiMsgEl);
                         }
                         if (data.usage) updateTokenDisplay(data.usage);
                         loadChatList();
@@ -949,17 +987,29 @@ function appendMessage(msg, idx, streaming) {
     var contentHtml = isUser
         ? escHtml(msg.content).replace(/\n/g, '<br>')
         : renderMarkdown(msg.content) + (streaming ? '<span class="cursor"></span>' : '');
+    var attachmentsHtml = '';
+    if (isUser && msg.attachments && msg.attachments.length) {
+        attachmentsHtml = '<div class="msg-attachments">' + msg.attachments.map(function (a) {
+            return '<span class="msg-attach-chip">\uD83D\uDCCE ' + escHtml(a.name) + '</span>';
+        }).join('') + '</div>';
+    }
     var actionsHtml = isUser ? (
         '<div class="msg-actions">'
         + '<button class="msg-act-btn" title="Copy" onclick="copyUserMessage(' + idx + ')">\uD83D\uDCCB</button>'
         + '<button class="msg-act-btn" title="Edit" onclick="editUserMessage(' + idx + ')">\u270F\uFE0F</button>'
         + '<button class="msg-act-btn msg-act-del" title="Delete" onclick="deleteUserMessage(' + idx + ')">\uD83D\uDDD1\uFE0F</button>'
         + '</div>'
-    ) : '';
+    ) : (
+        '<div class="msg-actions">'
+        + '<button class="msg-act-btn" title="Copy" data-action="copyAssistant">\uD83D\uDCCB</button>'
+        + '<button class="msg-act-btn" title="Save as file" data-action="saveAssistant">\uD83D\uDCBE</button>'
+        + '</div>'
+    );
     el.innerHTML = '<div class="msg-avatar ' + (isUser ? 'user' : 'ai') + '">' + (isUser ? '\ud83d\udc64' : 'AI') + '</div>'
         + '<div class="msg-body">'
         + '<div class="msg-name">' + (isUser ? 'You' : 'Assistant') + '</div>'
         + '<div class="msg-bubble">' + contentHtml + '</div>'
+        + attachmentsHtml
         + actionsHtml
         + '</div>';
     document.getElementById('messages').appendChild(el);
@@ -969,6 +1019,15 @@ function appendMessage(msg, idx, streaming) {
 function updateStreamingMessage(el, text) {
     var bubble = el.querySelector('.msg-bubble');
     if (bubble) bubble.innerHTML = renderMarkdown(text) + '<span class="cursor"></span>';
+}
+
+function updateChatBubble(el, reasoning, answer, streaming) {
+    var bubble = el.querySelector('.msg-bubble');
+    if (!bubble) return;
+    var html = '';
+    if (reasoning) html += '<div class="chat-reasoning">' + escHtml(reasoning).replace(/\n/g, '<br>') + '</div>';
+    if (answer) html += renderMarkdown(answer);
+    bubble.innerHTML = html + (streaming ? '<span class="cursor"></span>' : '');
 }
 
 function finalizeMessage(el, text) {
@@ -1061,9 +1120,14 @@ async function saveEditUserMessage(idx) {
         return;
     }
 
+    // Preserve any attachments that were on the original message
+    var origAttachments = (chatMessages[idx] && chatMessages[idx].attachments) ? chatMessages[idx].attachments : [];
+
     // Truncate chatMessages: keep everything up to (idx - 1), then new text as user msg
     chatMessages = chatMessages.slice(0, idx);
-    chatMessages.push({ role: 'user', content: newText });
+    var newMsg = { role: 'user', content: newText };
+    if (origAttachments.length) newMsg.attachments = origAttachments;
+    chatMessages.push(newMsg);
 
     // Re-render and resend (backend saves user + assistant reply atomically)
     renderMessages(chatMessages);
@@ -1115,8 +1179,12 @@ async function deleteUserMessage(idx) {
 async function resendLastUserMessage() {
     // The last message in chatMessages is the user text to send
     // Remove the visual user msg we just rendered (it's already in chatMessages)
+    streamError = false;
     var input = document.getElementById('chatInput');
-    var lastText = chatMessages[chatMessages.length - 1].content;
+    var lastMsg = chatMessages[chatMessages.length - 1];
+    var lastText = agentMode
+        ? composeAgentContent(lastMsg.content)
+        : composeUserContent(lastMsg.content, lastMsg.attachments || []);
 
     // show welcome off, messages on
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -1141,11 +1209,300 @@ async function resendLastUserMessage() {
     }
 
     isStreaming = false;
-    setAgentStatus('ready');
+    setAgentStatus(streamError ? 'error' : 'ready');
     streamController = null;
     document.getElementById('sendBtn').style.display = 'flex';
     document.getElementById('stopBtn').style.display = 'none';
     document.getElementById('chatInput').focus();
+}
+
+// ─── Attachments (paperclip, chat-only) ──────────────────────────────────────
+function updateInputToolbar() {
+    var btn = document.getElementById('attachBtn');
+    if (btn) btn.style.display = agentMode ? 'none' : 'flex';
+}
+
+function updateModeToggle() {
+    var pills = document.getElementById('modePills');
+    var label = document.getElementById('modeLabel');
+    if (pills) pills.style.display = agentMode ? 'flex' : 'none';
+    if (label) label.style.display = agentMode ? 'inline' : 'none';
+}
+
+function handleAttachFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    files.forEach(function (f) {
+        if (f.size > MAX_ATTACH_SIZE) {
+            showToast('File too large (max 200 KB): ' + f.name, 'error');
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function () {
+            pendingAttachments.push({ name: f.name, content: String(reader.result), size: f.size });
+            renderAttachList();
+        };
+        reader.onerror = function () { showToast('Failed to read: ' + f.name, 'error'); };
+        reader.readAsText(f);
+    });
+    var inp = document.getElementById('attachInput');
+    if (inp) inp.value = '';
+}
+
+function renderAttachList() {
+    var list = document.getElementById('attachList');
+    if (!list) return;
+    list.innerHTML = pendingAttachments.map(function (a, i) {
+        return '<span class="attach-chip">\uD83D\uDCCE ' + escHtml(a.name)
+            + ' <button class="attach-remove" title="Remove" onclick="removeAttachment(' + i + ')">\u2715</button></span>';
+    }).join('');
+    list.style.display = pendingAttachments.length ? 'flex' : 'none';
+}
+
+function removeAttachment(i) {
+    pendingAttachments.splice(i, 1);
+    renderAttachList();
+}
+
+// ─── Message composition (send-time) ─────────────────────────────────────────
+function composeUserContent(text, attachments) {
+    if (!attachments || !attachments.length) return text;
+    var parts = [text];
+    attachments.forEach(function (a) {
+        parts.push('Attached file: ' + a.name + '\n```\n' + a.content + '\n```');
+    });
+    return parts.filter(function (s) { return s && s.trim(); }).join('\n\n');
+}
+
+function composeAgentContent(text) {
+    var refs = [];
+    var re = /(?:^|\s)@([A-Za-z0-9_.\-\/\\]+)/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+        var p = m[1];
+        if (p && !/[\/\\]$/.test(p)) refs.push(p);
+    }
+    if (!refs.length) return text;
+    var note = '\n\nFiles referenced by the user \u2014 read them with read_file before answering:\n'
+        + refs.map(function (p) { return '- ' + p; }).join('\n');
+    return text + note;
+}
+
+// ─── Assistant copy / save ───────────────────────────────────────────────────
+function pushAssistantMessage(content, el) {
+    chatMessages.push({ role: 'assistant', content: content });
+    if (el) el.setAttribute('data-index', chatMessages.length - 1);
+}
+
+function messageIndex(el) {
+    var msgEl = el.closest('.message');
+    if (!msgEl) return -1;
+    var idx = msgEl.getAttribute('data-index');
+    return idx == null ? -1 : parseInt(idx, 10);
+}
+
+function copyAssistantMessage(idx) {
+    var msg = chatMessages[idx];
+    if (!msg) return;
+    navigator.clipboard.writeText(msg.content).then(function () {
+        showToast('Copied to clipboard', 'success');
+    }).catch(function () {
+        showToast('Failed to copy', 'error');
+    });
+}
+
+const LANG_EXT = {
+    python: 'py', py: 'py', c: 'c', 'c++': 'cpp', cpp: 'cpp', 'c#': 'cs', csharp: 'cs',
+    javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', tsx: 'tsx', jsx: 'jsx',
+    bash: 'sh', sh: 'sh', shell: 'sh', zsh: 'sh', powershell: 'ps1', ps1: 'ps1',
+    markdown: 'md', md: 'md', json: 'json', html: 'html', htm: 'html', css: 'css',
+    scss: 'scss', sql: 'sql', yaml: 'yml', yml: 'yml', toml: 'toml', ini: 'ini',
+    go: 'go', rust: 'rs', java: 'java', kotlin: 'kt', swift: 'swift', php: 'php',
+    ruby: 'rb', r: 'r', lua: 'lua', perl: 'pl', dart: 'dart', scala: 'scala',
+    text: 'txt', txt: 'txt', diff: 'diff'
+};
+
+function extForLang(lang) {
+    var l = (lang || '').trim().toLowerCase();
+    return LANG_EXT[l] || l || 'txt';
+}
+
+function parseCodeBlocks(text) {
+    var blocks = [];
+    var re = /```(\w*)[ \t]*\n?([\s\S]*?)```/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+        blocks.push({ lang: m[1].trim(), code: m[2].replace(/\n$/, '') });
+    }
+    return blocks;
+}
+
+function downloadTextFile(filename, content) {
+    var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+function saveAssistantMessage(idx, btn) {
+    var msg = chatMessages[idx];
+    if (!msg) return;
+    var text = msg.content || '';
+    var blocks = parseCodeBlocks(text);
+    if (!blocks.length) {
+        downloadTextFile('answer.md', text);
+        showToast('Saved answer.md', 'success');
+        return;
+    }
+    if (blocks.length === 1) {
+        var ext = extForLang(blocks[0].lang);
+        downloadTextFile('file.' + ext, blocks[0].code);
+        showToast('Saved file.' + ext, 'success');
+        return;
+    }
+    showSaveMenu(btn, blocks);
+}
+
+function showSaveMenu(btn, blocks) {
+    closeSaveMenu();
+    var menu = document.createElement('div');
+    menu.className = 'save-menu';
+    menu.id = 'saveMenu';
+    blocks.forEach(function (b, i) {
+        var ext = extForLang(b.lang);
+        var item = document.createElement('div');
+        item.className = 'save-menu-item';
+        item.textContent = 'file' + (i + 1) + '.' + ext + '  (' + (b.lang || 'text') + ')';
+        item.addEventListener('click', function () {
+            downloadTextFile('file' + (i + 1) + '.' + ext, b.code);
+            closeSaveMenu();
+            showToast('Saved file' + (i + 1) + '.' + ext, 'success');
+        });
+        menu.appendChild(item);
+    });
+    document.body.appendChild(menu);
+    var rect = btn.getBoundingClientRect();
+    menu.style.left = Math.min(rect.left, window.innerWidth - 280) + 'px';
+    menu.style.top = (rect.bottom + 6) + 'px';
+    setTimeout(function () { document.addEventListener('click', closeSaveMenuOnOutside); }, 0);
+}
+
+function closeSaveMenuOnOutside(e) {
+    if (e.target.closest('.save-menu')) return;
+    closeSaveMenu();
+}
+
+function closeSaveMenu() {
+    var m = document.getElementById('saveMenu');
+    if (m) m.remove();
+    document.removeEventListener('click', closeSaveMenuOnOutside);
+}
+
+// ─── @-mention autocomplete (agent-only) ─────────────────────────────────────
+function handleMentionInput() {
+    var ta = document.getElementById('chatInput');
+    if (!agentMode) { closeMentionMenu(); return; }
+    var ctx = getMentionContext(ta);
+    if (!ctx) { closeMentionMenu(); return; }
+    var q = ctx.query;
+    fetchFileSuggestions(q).then(function (items) {
+        var ctx2 = getMentionContext(ta);
+        if (!ctx2 || ctx2.query !== q) return;
+        mentionItems = items;
+        mentionActive = 0;
+        renderMentionMenu(ta);
+    });
+}
+
+function getMentionContext(ta) {
+    var pos = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
+    var before = ta.value.slice(0, pos);
+    var at = before.lastIndexOf('@');
+    if (at === -1) return null;
+    if (at > 0 && !/\s/.test(before.charAt(at - 1))) return null;
+    var query = before.slice(at + 1);
+    if (/\s/.test(query)) return null;
+    return { at: at, query: query };
+}
+
+async function fetchFileSuggestions(query) {
+    var dir = '.';
+    var prefix = query;
+    var slash = query.lastIndexOf('/');
+    if (slash !== -1) {
+        dir = query.slice(0, slash) || '.';
+        prefix = query.slice(slash + 1);
+    }
+    try {
+        var res = await fetch(API + '/api/files?path=' + encodeURIComponent(dir));
+        var d = await res.json();
+        if (!d.success) return [];
+        var p = prefix.toLowerCase();
+        return (d.entries || []).filter(function (e) {
+            if (e.type !== 'file' && e.type !== 'dir') return false;
+            return !p || e.name.toLowerCase().indexOf(p) === 0;
+        }).slice(0, 40);
+    } catch (e) {
+        return [];
+    }
+}
+
+function renderMentionMenu(ta) {
+    if (mentionMenu) { mentionMenu.remove(); mentionMenu = null; }
+    if (!mentionItems.length) return;
+    var menu = document.createElement('div');
+    menu.className = 'mention-menu';
+    mentionItems.forEach(function (item, i) {
+        var el = document.createElement('div');
+        el.className = 'mention-item' + (i === mentionActive ? ' active' : '');
+        el.textContent = (item.type === 'dir' ? '\uD83D\uDCC1 ' : '\uD83D\uDCC4 ') + item.path;
+        el.addEventListener('mousedown', function (e) { e.preventDefault(); chooseMention(i); });
+        menu.appendChild(el);
+    });
+    document.body.appendChild(menu);
+    mentionMenu = menu;
+    var bar = document.getElementById('input-bar');
+    var rect = bar.getBoundingClientRect();
+    menu.style.left = rect.left + 'px';
+    menu.style.width = Math.max(rect.width, 320) + 'px';
+    menu.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+}
+
+function moveMention(delta) {
+    if (!mentionItems.length) return;
+    mentionActive = (mentionActive + delta + mentionItems.length) % mentionItems.length;
+    var items = mentionMenu ? mentionMenu.querySelectorAll('.mention-item') : [];
+    items.forEach(function (el, i) {
+        el.classList.toggle('active', i === mentionActive);
+    });
+}
+
+function chooseMention(i) {
+    var item = mentionItems[i];
+    if (!item) { closeMentionMenu(); return; }
+    var ta = document.getElementById('chatInput');
+    var ctx = getMentionContext(ta);
+    if (!ctx) { closeMentionMenu(); return; }
+    var insert = '@' + item.path;
+    if (item.type === 'dir') insert += '/';
+    var pos = ta.selectionStart;
+    ta.value = ta.value.slice(0, ctx.at) + insert + ta.value.slice(pos);
+    var caret = ctx.at + insert.length;
+    ta.selectionStart = ta.selectionEnd = caret;
+    closeMentionMenu();
+    ta.focus();
+    autoResize(ta);
+    if (item.type === 'dir') handleMentionInput();
+}
+
+function closeMentionMenu() {
+    if (mentionMenu) { mentionMenu.remove(); mentionMenu = null; }
+    mentionItems = [];
+    mentionActive = -1;
 }
 
 function scrollToBottom(force) {
@@ -1946,6 +2303,12 @@ document.addEventListener('click', function (e) {
         case 'approve':
             if (id && approved !== undefined) approveToolCall(id, approved === 'true', el);
             break;
+        case 'copyAssistant':
+            copyAssistantMessage(messageIndex(el));
+            break;
+        case 'saveAssistant':
+            saveAssistantMessage(messageIndex(el), el);
+            break;
     }
 });
 
@@ -1963,6 +2326,9 @@ document.addEventListener('click', function (e) {
         document.getElementById('agentToggle').checked = true;
         document.getElementById('workdirBar').style.display = 'flex';
     }
+    updateInputToolbar();
+    updateModeToggle();
+    document.getElementById('chatInput').addEventListener('input', handleMentionInput);
     var lastChatId = localStorage.getItem('activeChatId');
     if (lastChatId) {
         openChatById(lastChatId).catch(function (e) {
