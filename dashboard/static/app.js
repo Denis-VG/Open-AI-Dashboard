@@ -7,6 +7,7 @@
 const API = '';
 let cfg = {};
 let currentChatId = null;
+let currentChatTitle = '';
 let chatMessages = [];
 let isStreaming = false;
 let streamError = false;
@@ -142,6 +143,14 @@ function relativeTime(iso) {
     if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
     if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
     return d.toLocaleDateString();
+}
+
+function formatDateTime(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString() + ' ' + time;
 }
 
 function renderMarkdown(text) {
@@ -399,7 +408,7 @@ async function loadChatList() {
             var modeBadge = isAgent
                 ? ' <span class="chat-mode-badge agent-badge" title="Agent mode">\uD83E\uDD16</span>'
                 : ' <span class="chat-mode-badge simple-badge" title="Simple chat">\uD83D\uDCAC</span>';
-            var meta = c.messageCount + ' msgs \u00b7 ' + relativeTime(c.updated);
+            var meta = c.messageCount + ' msgs \u00b7 ' + formatDateTime(c.updated);
             return '<div class="chat-item' + activeClass + '" data-action="openChat" data-id="' + c.id + '">'
                 + '<div style="min-width:0">'
                 + '<div class="chat-item-title">' + title + modeBadge + '</div>'
@@ -419,6 +428,7 @@ async function openChatById(id) {
         var chat = await res.json();
         if (chat.error) { localStorage.removeItem('activeChatId'); return; }
         currentChatId = id;
+        currentChatTitle = chat.title || '';
         localStorage.setItem('activeChatId', id);
         chatMessages = chat.messages || [];
         renderMessages(chatMessages);
@@ -446,6 +456,64 @@ async function openChatById(id) {
         switchPage('chat');
     } catch (e) {
         console.error('openChatById failed:', e);
+    }
+}
+
+// ─── Chat rename (inline title edit) ─────────────────────────────────────────
+function startRenameChat() {
+    if (!currentChatId) return;
+    var el = document.getElementById('topbarTitle');
+    if (!el || el.querySelector('input')) return;
+    var original = currentChatTitle || el.textContent.trim();
+    var input = document.createElement('input');
+    input.className = 'topbar-title-input';
+    input.type = 'text';
+    input.value = original;
+    input.maxLength = 200;
+    el.textContent = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+
+    var done = false;
+    function commit(save) {
+        if (done) return;
+        done = true;
+        var title = input.value.trim();
+        if (save && title && title !== original) {
+            renameChat(currentChatId, title, original);
+        } else {
+            el.textContent = original;
+        }
+    }
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+        else if (e.key === 'Escape') { commit(false); }
+    });
+    input.addEventListener('blur', function () { commit(true); });
+}
+
+async function renameChat(id, title, original) {
+    var el = document.getElementById('topbarTitle');
+    try {
+        var res = await fetch(API + '/api/chats/' + id + '/rename', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title })
+        });
+        var d = await res.json();
+        if (d.success) {
+            currentChatTitle = d.title || title;
+            el.textContent = currentChatTitle;
+            loadChatList();
+        } else {
+            el.textContent = original;
+            showToast('Rename failed', 'error');
+        }
+    } catch (e) {
+        console.error('renameChat failed:', e);
+        el.textContent = original;
+        showToast('Rename failed', 'error');
     }
 }
 

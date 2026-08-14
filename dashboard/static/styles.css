@@ -277,6 +277,23 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
+    border-radius: 6px;
+}
+.topbar-title:hover {
+    color: var(--accent);
+}
+.topbar-title-input {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 2px 8px;
+    width: 100%;
+    max-width: 420px;
+    outline: none;
 }
 .topbar-actions {
     display: flex;
