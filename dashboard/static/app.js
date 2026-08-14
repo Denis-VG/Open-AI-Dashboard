@@ -1099,7 +1099,6 @@ function editUserMessage(idx) {
     var ta = document.createElement('textarea');
     ta.className = 'msg-edit-textarea';
     ta.value = origText;
-    ta.setAttribute('data-orig', origText);
     ta.setAttribute('data-idx', idx);
     ta.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') cancelEditUserMessage(idx);
@@ -1137,15 +1136,17 @@ async function saveEditUserMessage(idx) {
     var ta = el.querySelector('.msg-edit-textarea');
     if (!ta) return;
     var newText = ta.value.trim();
-    var origText = ta.getAttribute('data-orig');
-
-    if (!newText || newText === origText) {
-        cancelEditUserMessage(idx);
-        return;
-    }
 
     // Preserve any attachments that were on the original message
     var origAttachments = (chatMessages[idx] && chatMessages[idx].attachments) ? chatMessages[idx].attachments : [];
+
+    // "Save & Resend" must resend even when the text is unchanged
+    // (e.g. retry after a failed/empty reply). Only cancel when there is
+    // nothing to send at all.
+    if (!newText && !origAttachments.length) {
+        cancelEditUserMessage(idx);
+        return;
+    }
 
     // Truncate chatMessages: keep everything up to (idx - 1), then new text as user msg
     chatMessages = chatMessages.slice(0, idx);
