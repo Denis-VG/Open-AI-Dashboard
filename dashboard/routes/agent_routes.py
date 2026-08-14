@@ -51,6 +51,24 @@ def _friendly_error(exc: Exception) -> str:
     return str(exc) or type(exc).__name__ or 'Unknown error'
 
 
+def _inline_attachments(message: dict) -> str:
+    """Inline a message's attachments into its content (for the model)."""
+    content = message.get('content', '') or ''
+    atts = message.get('attachments') or []
+    if not atts:
+        return content
+    parts = [content]
+    for a in atts:
+        if isinstance(a, dict):
+            name = a.get('name', 'file')
+            body = a.get('content', '') or ''
+        else:
+            name = str(a)
+            body = ''
+        parts.append(f'Attached file: {name}\n```\n{body}\n```')
+    return '\n\n'.join(p for p in parts if p and p.strip())
+
+
 async def _run_guarded(sse: SSEWriter, coro) -> object:
     """Run *coro* as a task, cancelling it if the client disconnects.
 
@@ -84,6 +102,7 @@ def _save_assistant_reply(
     full_text: str,
     messages: list[dict] | None = None,
     usage: dict | None = None,
+    attachments: list[dict] | None = None,
 ) -> None:
     """Persist user + assistant messages into the chat.
 
@@ -94,7 +113,10 @@ def _save_assistant_reply(
     existing = store.load(chat_id) or store.init_chat(chat_id, user_message[:50])
     if messages is not None:
         existing['messages'] = list(messages)
-    existing['messages'].append({'role': 'user', 'content': user_message})
+    user_msg = {'role': 'user', 'content': user_message}
+    if attachments:
+        user_msg['attachments'] = attachments
+    existing['messages'].append(user_msg)
     if full_text:
         existing['messages'].append({'role': 'assistant', 'content': full_text})
     existing['updated'] = datetime.now().isoformat()
@@ -169,6 +191,7 @@ async def _chat(req: Request) -> StreamResponse:
     chat_id = data.get('chatId')
     messages = data.get('messages', [])
     user_message = data.get('userMessage')
+    attachments = data.get('attachments', [])
     mode = data.get('mode', 'normal')
     cfg = read_config()
 
@@ -186,7 +209,14 @@ async def _chat(req: Request) -> StreamResponse:
     from ..agent import get_system_prompt
     sys_content = get_system_prompt(mode, tools._work_dir)
     history = [m for m in messages if m.get('role') != 'system']
-    all_messages = [{'role': 'system', 'content': sys_content}] + history + [{'role': 'user', 'content': user_message}]
+    model_history = []
+    for m in history:
+        mm = dict(m)
+        mm['content'] = _inline_attachments(mm)
+        mm.pop('attachments', None)
+        model_history.append(mm)
+    current_user = {'role': 'user', 'content': _inline_attachments({'content': user_message, 'attachments': attachments})}
+    all_messages = [{'role': 'system', 'content': sys_content}] + model_history + [current_user]
 
     full_text = ''
     error_occurred = False
@@ -207,7 +237,7 @@ async def _chat(req: Request) -> StreamResponse:
 
     if chat_id:
         store: ChatStore = req.app['chat_store']
-        _save_assistant_reply(store, chat_id, user_message, full_text if not error_occurred else '', messages)
+        _save_assistant_reply(store, chat_id, user_message, full_text if not error_occurred else '', messages, attachments=attachments)
 
     return resp
 

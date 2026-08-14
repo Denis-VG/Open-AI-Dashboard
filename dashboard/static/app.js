@@ -632,7 +632,7 @@ async function sendMessage() {
     if (agentMode) {
         await sendAgentMessage(composeAgentContent(text), typingEl);
     } else {
-        await sendChatMessage(composeUserContent(text, userMsg.attachments || []), typingEl);
+        await sendChatMessage(text, userMsg.attachments || [], typingEl);
     }
 
     isStreaming = false;
@@ -644,7 +644,7 @@ async function sendMessage() {
 }
 
 // ─── Chat SSE Streaming (FIXED: buffer for partial lines) ──────────────────
-async function sendChatMessage(text, typingEl) {
+async function sendChatMessage(rawText, attachments, typingEl) {
     var aiMsgEl = null;
     var fullText = '';
     var reasoningText = '';
@@ -656,7 +656,8 @@ async function sendChatMessage(text, typingEl) {
             body: JSON.stringify({
                 chatId: currentChatId,
                 messages: chatMessages.slice(0, -1),
-                userMessage: text,
+                userMessage: rawText,
+                attachments: attachments || [],
                 mode: currentMode
             }),
             signal: streamController.signal,
@@ -1205,9 +1206,7 @@ async function resendLastUserMessage() {
     streamError = false;
     var input = document.getElementById('chatInput');
     var lastMsg = chatMessages[chatMessages.length - 1];
-    var lastText = agentMode
-        ? composeAgentContent(lastMsg.content)
-        : composeUserContent(lastMsg.content, lastMsg.attachments || []);
+    var lastText = agentMode ? composeAgentContent(lastMsg.content) : lastMsg.content;
 
     // show welcome off, messages on
     document.getElementById('welcomeScreen').style.display = 'none';
@@ -1228,7 +1227,7 @@ async function resendLastUserMessage() {
     if (agentMode) {
         await sendAgentMessage(lastText, typingEl);
     } else {
-        await sendChatMessage(lastText, typingEl);
+        await sendChatMessage(lastMsg.content, lastMsg.attachments || [], typingEl);
     }
 
     isStreaming = false;
@@ -1287,15 +1286,6 @@ function removeAttachment(i) {
 }
 
 // ─── Message composition (send-time) ─────────────────────────────────────────
-function composeUserContent(text, attachments) {
-    if (!attachments || !attachments.length) return text;
-    var parts = [text];
-    attachments.forEach(function (a) {
-        parts.push('Attached file: ' + a.name + '\n```\n' + a.content + '\n```');
-    });
-    return parts.filter(function (s) { return s && s.trim(); }).join('\n\n');
-}
-
 function composeAgentContent(text) {
     var refs = [];
     var re = /(?:^|\s)@([A-Za-z0-9_.\-\/\\]+)/g;
