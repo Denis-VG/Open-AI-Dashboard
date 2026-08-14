@@ -95,7 +95,8 @@ def _save_assistant_reply(
     if messages is not None:
         existing['messages'] = list(messages)
     existing['messages'].append({'role': 'user', 'content': user_message})
-    existing['messages'].append({'role': 'assistant', 'content': full_text})
+    if full_text:
+        existing['messages'].append({'role': 'assistant', 'content': full_text})
     existing['updated'] = datetime.now().isoformat()
     if not existing.get('title') or existing['title'] == 'New Conversation':
         existing['title'] = user_message[:50]
@@ -154,7 +155,7 @@ async def _agent(req: Request) -> StreamResponse:
         #    creating an ever-growing error chain.
         await sse.send({'type': 'agent_error', 'error': _friendly_error(e)})
 
-    if chat_id and full_text:
+    if chat_id:
         _save_assistant_reply(store, chat_id, user_message, full_text, messages, total_usage)
 
     await sse.close()
@@ -204,9 +205,9 @@ async def _chat(req: Request) -> StreamResponse:
         await sse.send({'type': 'done', 'fullText': full_text})
     await sse.close()
 
-    if chat_id and full_text and not error_occurred:
+    if chat_id:
         store: ChatStore = req.app['chat_store']
-        _save_assistant_reply(store, chat_id, user_message, full_text, messages)
+        _save_assistant_reply(store, chat_id, user_message, full_text if not error_occurred else '', messages)
 
     return resp
 
