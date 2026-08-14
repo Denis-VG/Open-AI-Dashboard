@@ -123,11 +123,13 @@ def _save_assistant_reply(
     if not existing.get('title') or existing['title'] == 'New Conversation':
         existing['title'] = user_message[:50]
 
-    # Accumulate token usage
+    # Accumulate token usage (numeric fields only — some providers include
+    # nested detail objects like prompt_tokens_details, which must not be summed)
     if usage:
         prev = existing.get('total_usage', {})
         for key, val in usage.items():
-            prev[key] = prev.get(key, 0) + val
+            if isinstance(val, (int, float)):
+                prev[key] = prev.get(key, 0) + val
         existing['total_usage'] = prev
 
     store.save(chat_id, existing)
