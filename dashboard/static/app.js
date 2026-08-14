@@ -148,9 +148,16 @@ function renderMarkdown(text) {
     if (!text) return '';
     var html = escHtml(text);
 
+    // Pull out fenced code blocks first so the transforms below can't corrupt
+    // their contents (e.g. a blank line, a `#` heading or `**` inside code),
+    // and paragraph splitting can't break them apart.
+    var codeBlocks = [];
     html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
-        return '<pre><code>' + code.trim() + '</code></pre>';
+        var idx = codeBlocks.length;
+        codeBlocks.push({ lang: (lang || '').trim(), code: code.trim() });
+        return '\u0000CB' + idx + '\u0000';
     });
+
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
     html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
@@ -169,7 +176,32 @@ function renderMarkdown(text) {
         return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
     }).join('\n');
 
+    // Restore code blocks; a standalone placeholder got wrapped in <p>, so drop it.
+    html = html.replace(/(?:<p>)?\u0000CB(\d+)\u0000(?:<\/p>)?/g, function (_, i) {
+        var b = codeBlocks[parseInt(i, 10)];
+        return b ? renderCodeBlock(b.lang, b.code) : '';
+    });
+
     return html;
+}
+
+function codeBlockButtons() {
+    return '<button class="code-block-btn" type="button" title="Copy code" data-action="copyCodeBlock">\uD83D\uDCCB</button>'
+        + '<button class="code-block-btn" type="button" title="Download" data-action="saveCodeBlock">\uD83D\uDCBE</button>';
+}
+
+function renderCodeBlock(lang, code) {
+    var label = lang || 'text';
+    return '<div class="code-block" data-lang="' + escHtml(label) + '">'
+        + '<div class="code-block-head">'
+        + '<span class="code-block-lang">' + escHtml(label) + '</span>'
+        + codeBlockButtons()
+        + '</div>'
+        + '<pre><code>' + code + '</code></pre>'
+        + '<div class="code-block-foot">'
+        + codeBlockButtons()
+        + '</div>'
+        + '</div>';
 }
 
 // ─── Toast ──────────────────────────────────────────────────────────────────
@@ -1324,6 +1356,35 @@ function copyAssistantMessage(idx) {
     });
 }
 
+// ─── Code block copy / download ──────────────────────────────────────────────
+function codeBlockContext(el) {
+    return el.closest('.code-block');
+}
+
+function codeBlockText(block) {
+    var code = block.querySelector('pre code');
+    return code ? code.textContent : '';
+}
+
+function copyCodeBlock(el) {
+    var block = codeBlockContext(el);
+    if (!block) return;
+    navigator.clipboard.writeText(codeBlockText(block)).then(function () {
+        showToast('Copied to clipboard', 'success');
+    }).catch(function () {
+        showToast('Failed to copy', 'error');
+    });
+}
+
+function saveCodeBlock(el) {
+    var block = codeBlockContext(el);
+    if (!block) return;
+    var lang = block.getAttribute('data-lang') || '';
+    var filename = 'file.' + extForLang(lang);
+    downloadTextFile(filename, codeBlockText(block));
+    showToast('Saved ' + filename, 'success');
+}
+
 const LANG_EXT = {
     python: 'py', py: 'py', c: 'c', 'c++': 'cpp', cpp: 'cpp', 'c#': 'cs', csharp: 'cs',
     javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', tsx: 'tsx', jsx: 'jsx',
@@ -2322,6 +2383,12 @@ document.addEventListener('click', function (e) {
             break;
         case 'saveAssistant':
             saveAssistantMessage(messageIndex(el), el);
+            break;
+        case 'copyCodeBlock':
+            copyCodeBlock(el);
+            break;
+        case 'saveCodeBlock':
+            saveCodeBlock(el);
             break;
     }
 });

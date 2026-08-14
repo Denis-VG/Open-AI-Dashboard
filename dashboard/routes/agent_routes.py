@@ -219,12 +219,13 @@ async def _chat(req: Request) -> StreamResponse:
     all_messages = [{'role': 'system', 'content': sys_content}] + model_history + [current_user]
 
     full_text = ''
+    usage = {}
     error_occurred = False
 
     async def work():
-        nonlocal full_text, error_occurred
+        nonlocal full_text, usage, error_occurred
         try:
-            full_text = await _stream_chat(all_messages, cfg, sse)
+            full_text, usage = await _stream_chat(all_messages, cfg, sse)
         except Exception as e:
             error_occurred = True
             await sse.send({'type': 'error', 'content': _friendly_error(e)})
@@ -232,20 +233,20 @@ async def _chat(req: Request) -> StreamResponse:
     await _run_guarded(sse, work())
 
     if full_text and not error_occurred:
-        await sse.send({'type': 'done', 'fullText': full_text})
+        await sse.send({'type': 'done', 'fullText': full_text, 'usage': usage})
     await sse.close()
 
     if chat_id:
         store: ChatStore = req.app['chat_store']
-        _save_assistant_reply(store, chat_id, user_message, full_text if not error_occurred else '', messages, attachments=attachments)
+        _save_assistant_reply(store, chat_id, user_message, full_text if not error_occurred else '', messages, usage=usage, attachments=attachments)
 
     return resp
 
 
 # ── streaming helpers (chat route internals) ─────────────────────────────────
 
-async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
-    """Stream a chat completion through SSE, returning the full text."""
+async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> tuple[str, dict]:
+    """Stream a chat completion through SSE, returning (full_text, usage)."""
     import re as _re
     from aiohttp import ClientSession, ClientTimeout
 
@@ -256,7 +257,8 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
 
     # ── OpenAI / Ollama ──
     if provider in ('openai', 'ollama'):
-        payload = {'model': model, 'messages': messages, 'stream': True}
+        payload = {'model': model, 'messages': messages, 'stream': True,
+                   'stream_options': {'include_usage': True}}
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {api_key}',
@@ -267,6 +269,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
 
         try:
             full_text = ''
+            usage = {}
             async with ClientSession() as session:
                 async with session.post(
                     f'{base_url}/chat/completions', json=payload, headers=headers,
@@ -284,6 +287,8 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                             continue
                         try:
                             parsed = json.loads(raw)
+                            if parsed.get('usage'):
+                                usage = parsed['usage']
                             delta_obj = parsed.get('choices', [{}])[0].get('delta', {})
                             reasoning = delta_obj.get('reasoning_content') or delta_obj.get('reasoning') or ''
                             if reasoning:
@@ -294,7 +299,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                                 await sse.send({'type': 'delta', 'content': delta})
                         except Exception:
                             pass
-            return full_text
+            return full_text, usage
         except Exception as exc:
             log_api_error(provider, str(exc) or type(exc).__name__ or 'Unknown error', payload, None)
             raise
@@ -315,6 +320,7 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
 
         try:
             full_text = ''
+            usage = {}
             async with ClientSession() as session:
                 async with session.post(
                     'https://api.anthropic.com/v1/messages', json=payload, headers=headers,
@@ -329,13 +335,24 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                             continue
                         try:
                             parsed = json.loads(line[6:])
+                            ev_type = parsed.get('type')
+                            if ev_type == 'message_start':
+                                u = (parsed.get('message') or {}).get('usage') or {}
+                                usage['prompt_tokens'] = u.get('input_tokens', 0)
+                                usage['cache_read_input_tokens'] = u.get('cache_read_input_tokens', 0)
+                                usage['cache_creation_input_tokens'] = u.get('cache_creation_input_tokens', 0)
+                            elif ev_type == 'message_delta':
+                                u = parsed.get('usage') or {}
+                                if 'output_tokens' in u:
+                                    usage['completion_tokens'] = u['output_tokens']
                             delta = parsed.get('delta', {}).get('text', '')
                             if delta:
                                 full_text += delta
                                 await sse.send({'type': 'delta', 'content': delta})
                         except Exception:
                             pass
-            return full_text
+            usage['total_tokens'] = usage.get('prompt_tokens', 0) + usage.get('completion_tokens', 0)
+            return full_text, usage
         except Exception as exc:
             log_api_error('anthropic', str(exc) or type(exc).__name__ or 'Unknown error', payload, None)
             raise
@@ -359,6 +376,8 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
 
         try:
             full_text = ''
+            raw_buffer = ''
+            usage = {}
             async with ClientSession() as session:
                 async with session.post(url, json=payload, headers={'Content-Type': 'application/json'},
                                         timeout=ClientTimeout(total=None, connect=15, sock_read=60)) as resp:
@@ -367,20 +386,31 @@ async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> str:
                         raise Exception(f'Gemini API Error: status {resp.status}, body: {error_body[:1000]}')
                     async for chunk in resp.content:
                         chunk = chunk.decode('utf-8')
+                        raw_buffer += chunk
                         matches = _re.findall(r'"text":\s*"((?:[^"\\]|\\.)*)"', chunk)
                         for m in matches:
                             text = json.loads('{' + m + '}').get('text', '')
                             if text:
                                 full_text += text
                                 await sse.send({'type': 'delta', 'content': text})
-            return full_text
+
+            def _gem_num(name):
+                m = _re.search(r'"' + name + r'"\s*:\s*(\d+)', raw_buffer)
+                return int(m.group(1)) if m else 0
+
+            usage = {
+                'prompt_tokens': _gem_num('promptTokenCount'),
+                'completion_tokens': _gem_num('candidatesTokenCount'),
+                'total_tokens': _gem_num('totalTokenCount'),
+            }
+            return full_text, usage
         except Exception as exc:
             log_api_error('gemini', str(exc) or type(exc).__name__ or 'Unknown error',
                           {'url': safe_url, 'payload': payload}, None)
             raise
 
     await sse.send({'type': 'error', 'content': 'Provider not configured or unsupported.'})
-    return ''
+    return '', {}
 
 
 # ── approval ─────────────────────────────────────────────────────────────────
