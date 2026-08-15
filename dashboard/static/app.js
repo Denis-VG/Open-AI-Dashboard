@@ -21,6 +21,7 @@ let soundEnabled = true;
 let workDir = '';
 let sessionUsage = {};
 let pendingAttachments = [];
+let messageQueue = [];
 let mentionMenu = null;
 let mentionItems = [];
 let mentionActive = -1;
@@ -685,38 +686,90 @@ function sendSuggestion(text) {
     sendMessage();
 }
 
+// ─── Message queue (pending messages while agent is busy) ──────────────────
+function enqueueMessage(text, attachments) {
+    messageQueue.push({ content: text, attachments: attachments || [] });
+    renderQueue();
+    showToast('Queued · ' + messageQueue.length);
+}
+
+function removeQueueItem(i) {
+    if (i < 0 || i >= messageQueue.length) return;
+    messageQueue.splice(i, 1);
+    renderQueue();
+}
+
+function clearQueue() {
+    messageQueue = [];
+    renderQueue();
+}
+
+function renderQueue() {
+    var el = document.getElementById('messageQueue');
+    var list = document.getElementById('queueList');
+    var count = document.getElementById('queueCount');
+    if (!el || !list || !count) return;
+
+    if (!messageQueue.length) {
+        el.style.display = 'none';
+        return;
+    }
+
+    el.style.display = '';
+    count.textContent = messageQueue.length + ' queued';
+    list.innerHTML = messageQueue.map(function (item, i) {
+        var label = item.content || (item.attachments && item.attachments.length ? '[attachments]' : '');
+        return '<div class="queue-item">'
+            + '<span class="queue-item-text">' + escHtml(label) + '</span>'
+            + '<button class="queue-item-del" onclick="removeQueueItem(' + i + ')" title="Remove">\u00d7</button>'
+            + '</div>';
+    }).join('');
+}
+
 async function sendMessage() {
-    if (isStreaming) return;
-    streamError = false;
     var input = document.getElementById('chatInput');
     var text = input.value.trim();
-    if (!text && !pendingAttachments.length) return;
+    var attachments = pendingAttachments.map(function (a) {
+        return { name: a.name, content: a.content, size: a.size };
+    });
+
+    if (!text && !attachments.length) return;
     if (!cfg.AI_PROVIDER) {
         showToast('Please configure a provider first', 'error');
         switchPage('setup');
         return;
     }
 
-    if (!currentChatId) await startNewChat();
-
-    var userMsg = { role: 'user', content: text };
-    if (pendingAttachments.length) {
-        userMsg.attachments = pendingAttachments.map(function (a) {
-            return { name: a.name, content: a.content, size: a.size };
-        });
-    }
+    input.value = '';
+    input.style.height = 'auto';
     pendingAttachments = [];
     renderAttachList();
 
+    if (isStreaming) {
+        enqueueMessage(text, attachments);
+        return;
+    }
+
+    await sendOneMessage(text, attachments);
+    await drainQueue();
+}
+
+async function sendOneMessage(text, attachments) {
+    isStreaming = true;
+    streamError = false;
+    if (!currentChatId) await startNewChat();
+
+    var userMsg = { role: 'user', content: text };
+    if (attachments && attachments.length) userMsg.attachments = attachments;
+
     setAgentStatus('thinking');
-    input.value = '';
-    input.style.height = 'auto';
 
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('messages').style.display = 'flex';
 
     chatMessages.push(userMsg);
-    appendMessage(userMsg, chatMessages.length - 1);
+    var userEl = appendMessage(userMsg, chatMessages.length - 1);
+    if (userEl) userEl.classList.add('msg-processing');
     scrollToBottom();
 
     var typingEl = document.createElement('div');
@@ -725,7 +778,6 @@ async function sendMessage() {
     document.getElementById('messages').appendChild(typingEl);
     scrollToBottom();
 
-    isStreaming = true;
     userScrolled = false;
     document.getElementById('sendBtn').style.display = 'none';
     document.getElementById('stopBtn').style.display = 'flex';
@@ -733,7 +785,7 @@ async function sendMessage() {
     if (agentMode) {
         await sendAgentMessage(composeAgentContent(text), typingEl);
     } else {
-        await sendChatMessage(text, userMsg.attachments || [], typingEl);
+        await sendChatMessage(text, attachments || [], typingEl);
     }
 
     isStreaming = false;
@@ -741,7 +793,16 @@ async function sendMessage() {
     streamController = null;
     document.getElementById('sendBtn').style.display = 'flex';
     document.getElementById('stopBtn').style.display = 'none';
+    if (userEl) userEl.classList.remove('msg-processing');
     document.getElementById('chatInput').focus();
+}
+
+async function drainQueue() {
+    while (messageQueue.length) {
+        var item = messageQueue.shift();
+        renderQueue();
+        await sendOneMessage(item.content, item.attachments || []);
+    }
 }
 
 // ─── Notification sound (Web Audio API, no external libraries) ─────────────
@@ -888,7 +949,9 @@ async function sendAgentMessage(text, typingEl) {
     var aiMsgEl = null;
     var fullText = '';
     var toolCards = new Map();
+    var toolEntries = new Map();
     var lastReasoningEl = null;
+    var currentStepCard = null;
     try {
         streamController = new AbortController();
         var res = await fetch(API + '/api/agent', {
@@ -921,11 +984,13 @@ async function sendAgentMessage(text, typingEl) {
                         // Finalize previous reasoning card if any
                         if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
                         lastReasoningEl = null;
+                        currentStepCard = null;
                     } else if (data.type === 'agent_reasoning') {
                         setAgentStatus('reasoning');
                         // Finalize previous, create new inline reasoning card
                         if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
                         lastReasoningEl = createReasoningCard(data.iteration, data.content);
+                        currentStepCard = lastReasoningEl;
                         document.getElementById('messages').appendChild(lastReasoningEl);
                         scrollToBottom();
                     } else if (data.type === 'tool_call') {
@@ -934,6 +999,7 @@ async function sendAgentMessage(text, typingEl) {
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         var card = createToolCard(data);
                         toolCards.set(data.id, card);
+                        toolEntries.set(data.id, addRequestEntry(currentStepCard, data));
                         document.getElementById('messages').appendChild(card);
                         scrollToBottom();
                     } else if (data.type === 'approval_needed') {
@@ -944,6 +1010,7 @@ async function sendAgentMessage(text, typingEl) {
                     } else if (data.type === 'tool_result') {
                         var card3 = toolCards.get(data.id);
                         if (card3) updateToolCardResult(card3, data);
+                        updateRequestEntry(toolEntries.get(data.id), !!(data.result && data.result.success));
                         scrollToBottom();
                     } else if (data.type === 'tool_rejected') {
                         var card4 = toolCards.get(data.id);
@@ -953,8 +1020,10 @@ async function sendAgentMessage(text, typingEl) {
                             var ab = card4.querySelector('.approval-bar');
                             if (ab) ab.remove();
                         }
+                        updateRequestEntry(toolEntries.get(data.id), false);
                     } else if (data.type === 'agent_text') {
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
+                        currentStepCard = null;
                         fullText = data.content;
                         if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
                         finalizeMessage(aiMsgEl, fullText);
@@ -970,6 +1039,7 @@ async function sendAgentMessage(text, typingEl) {
                     } else if (data.type === 'done') {
                         playBell();
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
+                        currentStepCard = null;
                         if (data.fullText) {
                             fullText = data.fullText;
                             if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
@@ -1003,6 +1073,14 @@ function createReasoningCard(iteration, content) {
         + '<span class="reasoning-arrow open">\u25bc</span>'
         + '</div>'
         + '<div class="reasoning-body open">' + escHtml(content) + '</div>'
+        + '<div class="reasoning-footer" style="display:none">'
+        + '<div class="reasoning-footer-head" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.reasoning-footer-arrow\').classList.toggle(\'open\')">'
+        + '<span class="reasoning-footer-title">Requests</span>'
+        + '<span class="reasoning-footer-count">0</span>'
+        + '<span class="reasoning-footer-arrow">\u25be</span>'
+        + '</div>'
+        + '<div class="reasoning-requests"></div>'
+        + '</div>'
         + '</div></div>';
     return el;
 }
@@ -1016,23 +1094,59 @@ function finalizeReasoningCard(el) {
     if (arrow) arrow.classList.remove('open');
 }
 
+function toolPreview(name, args) {
+    var p = name === 'write_file' || name === 'read_file' ? args.path
+        : name === 'execute_command' ? args.command
+        : name === 'list_directory' ? (args.path || '.')
+        : args.pattern;
+    return String(p || '').slice(0, 60);
+}
+
+// ─── Request entries (per-step footer list) ────────────────────────────────
+function addRequestEntry(stepEl, data) {
+    if (!stepEl) return null;
+    var footer = stepEl.querySelector('.reasoning-footer');
+    if (!footer) return null;
+    footer.style.display = '';
+    var list = footer.querySelector('.reasoning-requests');
+    var entry = document.createElement('div');
+    entry.className = 'request-entry running';
+    entry.innerHTML = '<span class="request-status"></span>'
+        + '<span class="request-label">' + escHtml(data.name + '(' + toolPreview(data.name, data.args) + ')') + '</span>';
+    list.appendChild(entry);
+    updateReasoningFooterCount(footer);
+    return entry;
+}
+
+function updateRequestEntry(entry, ok) {
+    if (!entry) return;
+    entry.className = 'request-entry ' + (ok ? 'success' : 'failed');
+}
+
+function updateReasoningFooterCount(footer) {
+    var count = footer.querySelector('.reasoning-footer-count');
+    var list = footer.querySelector('.reasoning-requests');
+    if (count) count.textContent = list ? list.children.length : 0;
+}
+
 // ─── Tool Cards ─────────────────────────────────────────────────────────────
 function createToolCard(data) {
     var icons = { write_file: '\ud83d\udcc4', read_file: '\ud83d\udcd6', list_directory: '\ud83d\udcc1', execute_command: '\u26a1', search_files: '\ud83d\udd0d' };
     var el = document.createElement('div');
     el.className = 'message';
-    var argsPreview = data.name === 'write_file' ? data.args.path
-        : data.name === 'execute_command' ? data.args.command
-        : data.name === 'read_file' ? data.args.path
-        : data.name === 'list_directory' ? (data.args.path || '.')
-        : data.args.pattern;
+    var preview = toolPreview(data.name, data.args);
     el.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="tool-card" id="tc_' + data.id + '">'
         + '<div class="tool-header" onclick="this.nextElementSibling.classList.toggle(\'open\')">'
         + '<span class="tool-icon">' + (icons[data.name] || '\ud83d\udd27') + '</span>'
-        + '<span class="tool-name">' + data.name + '(' + escHtml(String(argsPreview || '').slice(0, 60)) + ')</span>'
+        + '<span class="tool-name">' + data.name + '(' + escHtml(preview) + ')</span>'
         + '<span class="tool-status running">' + (data.needs_approval ? 'Pending' : 'Running') + '</span>'
         + '</div>'
-        + '<div class="tool-body">' + (data.name === 'write_file' ? escHtml(data.args.content || '').slice(0, 2000) : JSON.stringify(data.args, null, 2)) + '</div>'
+        + '<div class="tool-body">'
+        + '<div class="tool-section-label">Request</div>'
+        + '<div class="tool-request">' + (data.name === 'write_file' ? escHtml(data.args.content || '').slice(0, 2000) : JSON.stringify(data.args, null, 2)) + '</div>'
+        + '<div class="tool-section-label">Result</div>'
+        + '<div class="tool-result"></div>'
+        + '</div>'
         + '</div></div>';
     return el;
 }
@@ -1092,7 +1206,8 @@ function updateToolCardResult(card, data) {
     } else {
         resultText = JSON.stringify(data.result, null, 2);
     }
-    body.textContent = resultText || '(no output)';
+    var resultEl = tc.querySelector('.tool-result');
+    if (resultEl) resultEl.textContent = resultText || '(no output)';
     body.classList.add('open');
 }
 
@@ -1403,6 +1518,7 @@ async function resendLastUserMessage() {
     streamController = null;
     document.getElementById('sendBtn').style.display = 'flex';
     document.getElementById('stopBtn').style.display = 'none';
+    await drainQueue();
     document.getElementById('chatInput').focus();
 }
 

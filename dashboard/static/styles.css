@@ -1708,3 +1708,150 @@ select {
 .chat-reasoning.collapsed .chat-reasoning-body {
     display: none;
 }
+
+/* ─── Message queue (pending messages above the input bar) ─────────────────── */
+.queue {
+    margin: 8px 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 10px);
+    background: var(--surface);
+    overflow: hidden;
+}
+.queue-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+}
+.queue-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+}
+.queue-count {
+    font-size: 0.72rem;
+    color: var(--text3);
+}
+.queue-clear {
+    margin-left: auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text2);
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+}
+.queue-clear:hover { color: var(--error); background: var(--surface2); }
+.queue-list {
+    max-height: 160px;
+    overflow-y: auto;
+}
+.queue-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+}
+.queue-item:last-child { border-bottom: none; }
+.queue-item-text {
+    flex: 1;
+    color: var(--text2);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.queue-item-del {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text3);
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 5px;
+    flex-shrink: 0;
+}
+.queue-item-del:hover { color: var(--error); background: var(--surface2); }
+
+/* ─── Sticky in-flight request (agent mode) ────────────────────────────────── */
+.message.msg-processing {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg);
+    padding: 6px 10px;
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* ─── Reasoning footer: per-step request list ──────────────────────────────── */
+.reasoning-footer {
+    border-top: 1px solid var(--border);
+}
+.reasoning-footer-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.72rem;
+    color: var(--text3);
+}
+.reasoning-footer-title { font-weight: 600; }
+.reasoning-footer-count {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 0 6px;
+    font-size: 0.68rem;
+}
+.reasoning-footer-arrow {
+    margin-left: auto;
+    transition: transform 0.2s ease;
+}
+.reasoning-footer-arrow.open { transform: rotate(180deg); }
+.reasoning-requests {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: 4px 12px 8px;
+}
+.reasoning-requests.open { display: block; }
+.request-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.72rem;
+    font-family: 'SF Mono', monospace;
+    color: var(--text2);
+}
+.request-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.request-entry.running .request-status { background: var(--accent); animation: rpulse 1.2s ease-in-out infinite; }
+.request-entry.success .request-status { background: var(--success); }
+.request-entry.failed .request-status { background: var(--error); }
+.request-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* ─── Tool request/result tree sections ────────────────────────────────────── */
+.tool-section-label {
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text3);
+    margin: 8px 0 4px;
+}
+.tool-section-label:first-child { margin-top: 0; }
+.tool-result { color: var(--text); }
