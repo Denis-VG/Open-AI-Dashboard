@@ -140,7 +140,7 @@ async def _system_prompt_post(req: Request) -> web.Response:
 
 async def _project_prompt_get(req: Request) -> web.Response:
     work_dir = req.app['work_dir']
-    path = os.path.join(work_dir, '.ai', 'project_prompt.txt')
+    path = os.path.join(work_dir, '.openAiDashboard', 'project_prompt.txt')
     if not os.path.exists(path):
         return web.json_response({'prompt': ''})
     try:
@@ -154,7 +154,7 @@ async def _project_prompt_post(req: Request) -> web.Response:
     data = await req.json()
     work_dir = req.app['work_dir']
     prompt = data.get('prompt', '')
-    path = os.path.join(work_dir, '.ai', 'project_prompt.txt')
+    path = os.path.join(work_dir, '.openAiDashboard', 'project_prompt.txt')
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         f.write(prompt)
@@ -165,7 +165,7 @@ async def _project_prompt_post(req: Request) -> web.Response:
 
 async def _project_usage_get(req: Request) -> web.Response:
     work_dir = req.app['work_dir']
-    path = os.path.join(work_dir, '.ai', 'total_usage.json')
+    path = os.path.join(work_dir, '.openAiDashboard', 'total_usage.json')
     if not os.path.exists(path):
         return web.json_response({'total_tokens': 0})
     try:
@@ -181,7 +181,7 @@ async def _project_usage_post(req: Request) -> web.Response:
     import json as _json
     work_dir = req.app['work_dir']
     usage = await req.json()
-    path = os.path.join(work_dir, '.ai', 'total_usage.json')
+    path = os.path.join(work_dir, '.openAiDashboard', 'total_usage.json')
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     existing = {}

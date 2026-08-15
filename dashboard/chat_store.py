@@ -1,5 +1,6 @@
 """
-Chat history storage — CRUD for JSON files in data/chats/.
+Chat history storage — CRUD for JSON files in the project chats directory
+(`{work_dir}/.openAiDashboard/chats/`).
 """
 
 import json

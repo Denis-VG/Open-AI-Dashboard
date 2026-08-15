@@ -38,14 +38,14 @@ from dashboard.chat_store import ChatStore
 from dashboard.approval import ApprovalManager
 from dashboard.tools import ToolRegistry
 from dashboard.config import ensure_defaults
-from dashboard.constants import PORT, HOST
+from dashboard.constants import PORT, HOST, LOG_DIR
 
 
 async def create_app(work_dir: str) -> web.Application:
     app = web.Application()
 
     # ── infrastructure singletons (DI via app dict) ───────────────────
-    chats_dir = os.path.join(work_dir, '.ai', 'chats')
+    chats_dir = os.path.join(work_dir, '.openAiDashboard', 'chats')
     app['chat_store'] = ChatStore(chats_dir)
     app['approval'] = ApprovalManager()
     app['tool_registry'] = ToolRegistry(work_dir)
@@ -81,6 +81,19 @@ if __name__ == '__main__':
 
     # Create config with sensible defaults on first launch
     ensure_defaults()
+
+    # Write a startup log entry to data/logs/server.log
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        from datetime import datetime
+        log_path = os.path.join(LOG_DIR, 'server.log')
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(
+                f"[{datetime.now().isoformat()}] server started: "
+                f"host={HOST} port={PORT} work_dir={WORK_DIR}\n"
+            )
+    except Exception:
+        pass
 
     print(f'\n  Dashboard running at http://{HOST}:{PORT}')
     print(f'  Agent working directory: {WORK_DIR}')

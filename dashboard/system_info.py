@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from typing import Optional
 
-from .constants import DATA_DIR, IS_WIN, IS_MAC, ROOT_DIR, ARCH, BIN_DIR, PLATFORM
+from .constants import DATA_DIR, IS_WIN, IS_MAC, LOG_DIR, ROOT_DIR, ARCH, BIN_DIR, PLATFORM
 
 # Optional psutil
 try:
@@ -202,7 +202,7 @@ def get_system_info() -> dict:
 # ── session logs ──────────────────────────────────────────────────
 
 def get_session_logs(limit: int = 50) -> list[dict]:
-    logs_dir = os.path.join(DATA_DIR, 'app_data')
+    logs_dir = LOG_DIR
     logs: list[dict] = []
     os.makedirs(logs_dir, exist_ok=True)
 

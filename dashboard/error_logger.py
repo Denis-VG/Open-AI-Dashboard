@@ -1,6 +1,6 @@
 """
 Error logging for AI API calls.
-Writes timestamped logs to .app_data/ in the project root.
+Writes timestamped logs to data/logs/ in the server directory.
 """
 
 import json
@@ -9,9 +9,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from .constants import ROOT_DIR
-
-APP_DATA_DIR = os.path.join(ROOT_DIR, '.app_data')
+from .constants import LOG_DIR
 
 # Sensitive keys whose values will be masked in logs
 _SENSITIVE_KEYS = {'api_key', 'apikey', 'authorization', 'x-api-key', 'key',
@@ -48,10 +46,10 @@ def log_api_error(
     request_body: Any = None,
     response_body: Any = None,
 ) -> None:
-    """Write an API error log to .app_data/YYYYMMDD_HHMMSS.log"""
-    os.makedirs(APP_DATA_DIR, exist_ok=True)
+    """Write an API error log to data/logs/YYYYMMDD_HHMMSS.log"""
+    os.makedirs(LOG_DIR, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filepath = os.path.join(APP_DATA_DIR, f'{timestamp}.log')
+    filepath = os.path.join(LOG_DIR, f'{timestamp}.log')
 
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write('=== AI API Error Log ===\n')

@@ -37,13 +37,13 @@ Required packages (see `requirements.txt`):
 - **Agent & Chat modes** — toggle between simple chat and tool-calling agent (file ops, shell commands)
 - **Normal / Limitless** — require approval for writes, or auto-execute everything
 - **Edit, copy & delete messages** — hover any user message for ✏️ 📋 🗑️; editing truncates history and resends
-- **Chats per project** — history stored in `{work_dir}/.ai/chats/`, isolated from other projects
+- **Chats per project** — history stored in `{work_dir}/.openAiDashboard/chats/`, isolated from other projects
 - **Custom system prompt** — Setup tab: define your own agent rules (leave blank for defaults)
 - **Multiple AI providers** — OpenAI, Anthropic, Gemini, DeepSeek, Ollama, LM Studio, OpenRouter, NVIDIA NIM
 - **Configuration profiles** — save and switch between provider setups
 - **Token usage tracking** — per-chat bar: `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; global project stats in sidebar
 - **Prompt caching** — Anthropic (explicit cache control) & DeepSeek (native); cache hit % in token bar
-- **Project instructions** — Setup tab: append project-specific rules to system prompt (stored in `.ai/project_prompt.txt`)
+- **Project instructions** — Setup tab: append project-specific rules to system prompt (stored in `.openAiDashboard/project_prompt.txt`)
 - **Inline reasoning cards** — agent thoughts appear right before each tool call, not stuck at the top; approval buttons always visible
 - **Agent status indicator** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec with elapsed timer
 - **Chat attachments** — attach files to a message (text attachments up to 200 KB each); stored separately so conversation history shows links, not inline content
@@ -73,7 +73,7 @@ Contributions, bug reports, and feedback are welcome!
 In **agent mode with the Limitless setting** the agent can execute shell commands and file operations **without approval**. It is **strictly recommended to run it only inside a sandbox or virtual machine**:
 
 - LLMs can hallucinate or misinterpret input, producing destructive commands (deleting files, overwriting data, etc.)
-- The agent has access to the working directory and can modify the files of the system and working prompts (`system prompt`, `.ai/project_prompt.txt`, etc.)
+- The agent has access to the working directory and can modify the files of the system and working prompts (`system prompt`, `.openAiDashboard/project_prompt.txt`, etc.)
 - Incorrect or malformed user input can lead to unintended side effects
 
 Never run Limitless agent mode on your main machine with important data.
@@ -117,13 +117,13 @@ pip install -r requirements.txt
 - **Agent и Chat режимы** — переключение между простым чатом и агентом с инструментами (файлы, команды)
 - **Normal / Limitless** — запрос подтверждения для записи или авто-выполнение
 - **Редактирование, копирование и удаление сообщений** — наведите на сообщение: ✏️ 📋 🗑️; при редактировании история обрезается и переотправляется
-- **Чаты по проектам** — история в `{work_dir}/.ai/chats/`, изолирована от других проектов
+- **Чаты по проектам** — история в `{work_dir}/.openAiDashboard/chats/`, изолирована от других проектов
 - **Настраиваемый system prompt** — вкладка Setup: собственные инструкции для агента (пусто — используются стандартные)
 - **Множество AI-провайдеров** — OpenAI, Anthropic, Gemini, DeepSeek, Ollama, LM Studio, OpenRouter, NVIDIA NIM
 - **Профили конфигураций** — сохраняйте и переключайтесь между настройками провайдеров
 - **Учёт токенов** — строка внизу чата: `Tokens: 1.9k (1.3k in / 0.6k out) · Cache: 60%`; глобальная статистика по проекту в сайдбаре
 - **Кэширование промптов** — Anthropic (явное) и DeepSeek (авто); процент попаданий в кэш в токен-баре
-- **Инструкции проекта** — вкладка Setup: добавление правил проекта в system prompt (файл `.ai/project_prompt.txt`)
+- **Инструкции проекта** — вкладка Setup: добавление правил проекта в system prompt (файл `.openAiDashboard/project_prompt.txt`)
 - **Inline-карточки рассуждений** — мысли агента перед каждым действием, а не вверху; кнопки подтверждения всегда видны
 - **Индикатор статуса агента** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec с таймером
 - **Вложения в чат** — прикрепляйте файлы к сообщению (текстовые вложения до 200 КБ); хранятся отдельно, поэтому в истории чата показываются ссылки, а не инлайн-содержимое
@@ -153,7 +153,7 @@ pip install -r requirements.txt
 В **режиме агента с настройкой Limitless** агент может выполнять shell-команды и файловые операции **без подтверждения**. **Строго рекомендуется запускать его только внутри песочницы или виртуальной машины**:
 
 - LLM могут галлюцинировать или неверно интерпретировать ввод, что приводит к разрушительным командам (удаление файлов, перезапись данных и т.п.)
-- Агент имеет доступ к рабочей директории и может изменять файлы системного и рабочего промтов (`system prompt`, `.ai/project_prompt.txt` и др.)
+- Агент имеет доступ к рабочей директории и может изменять файлы системного и рабочего промтов (`system prompt`, `.openAiDashboard/project_prompt.txt` и др.)
 - Некорректный или повреждённый ввод пользователя может привести к непреднамеренным побочным эффектам
 
 Никогда не запускайте режим агента Limitless на основной машине с важными данными.

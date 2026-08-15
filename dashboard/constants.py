@@ -9,6 +9,7 @@ __dirname = os.path.dirname(os.path.abspath(__file__))
 SERVER_DIR = __dirname  # public alias
 ROOT_DIR = os.path.join(__dirname, '..')
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
+LOG_DIR = os.path.join(DATA_DIR, 'logs')
 ENV_FILE = os.path.join(DATA_DIR, 'ai_settings.env')
 HTML_FILE = os.path.join(__dirname, 'index.html')
 

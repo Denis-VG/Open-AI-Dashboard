@@ -59,7 +59,7 @@ def get_system_prompt(mode: str, work_dir: str) -> str:
         base = _DEFAULT_SYSTEM_PROMPT.format(work_dir=work_dir_display)
 
     # Append project-specific instructions if present
-    project_path = os.path.join(work_dir, '.ai', 'project_prompt.txt')
+    project_path = os.path.join(work_dir, '.openAiDashboard', 'project_prompt.txt')
     if os.path.exists(project_path):
         try:
             with open(project_path, 'r', encoding='utf-8') as f:
