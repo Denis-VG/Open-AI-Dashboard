@@ -972,6 +972,8 @@ async function sendAgentMessage(text, typingEl) {
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         if (data.fullText) {
                             fullText = data.fullText;
+                            if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
+                            finalizeMessage(aiMsgEl, fullText);
                             pushAssistantMessage(fullText, aiMsgEl);
                         }
                         if (data.usage) updateTokenDisplay(data.usage);

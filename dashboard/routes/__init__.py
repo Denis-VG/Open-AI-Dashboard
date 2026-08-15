@@ -2,7 +2,25 @@
 Route registration — collects all route modules and registers them on the app.
 """
 
+import os as _os
+
 from aiohttp import web
+
+from ..constants import SERVER_DIR as _SD
+
+
+async def handle_favicon(_request: web.Request) -> web.Response:
+    """Serve /favicon.ico from the dashboard package directory."""
+    icon_path = _os.path.join(_SD, 'favicon.ico')
+    if not _os.path.isfile(icon_path):
+        return web.Response(status=404)
+    with open(icon_path, 'rb') as f:
+        body = f.read()
+    return web.Response(
+        body=body,
+        content_type='image/x-icon',
+        headers={'Cache-Control': 'public, max-age=86400'},
+    )
 
 
 def register_all(app: web.Application) -> None:
@@ -17,9 +35,6 @@ def register_all(app: web.Application) -> None:
         agent_routes,
     )
 
-    import os as _os
-    from ..constants import SERVER_DIR as _SD
-
     # Static files (CSS, JS, assets)
     _static_dir = _os.path.join(_SD, 'static')
     if _os.path.isdir(_static_dir):
@@ -27,6 +42,9 @@ def register_all(app: web.Application) -> None:
 
     # Static file / index
     app.router.add_get('/', config_routes.handle_index)
+
+    # Favicon
+    app.router.add_get('/favicon.ico', handle_favicon, name='favicon')
 
     # Config
     config_routes.register(app)
