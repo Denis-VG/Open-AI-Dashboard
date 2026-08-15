@@ -17,6 +17,7 @@ let streamController = null;
 let userScrolled = false;
 let currentMode = 'normal';
 let agentMode = false;
+let soundEnabled = true;
 let workDir = '';
 let sessionUsage = {};
 let pendingAttachments = [];
@@ -743,6 +744,67 @@ async function sendMessage() {
     document.getElementById('chatInput').focus();
 }
 
+// ─── Notification sound (Web Audio API, no external libraries) ─────────────
+var _audioCtx = null;
+
+function _chime(ctx, freq, start, type, dur) {
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    dur = dur || 0.6;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.35, start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + dur + 0.05);
+}
+
+function _withCtx(cb) {
+    if (!soundEnabled) return;
+    try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        if (!_audioCtx) _audioCtx = new AC();
+        var ctx = _audioCtx;
+        var run = function () { cb(ctx); };
+        if (ctx.state === 'suspended') {
+            ctx.resume().then(run).catch(function () {});
+        } else {
+            run();
+        }
+    } catch (e) {
+        // Audio is non-critical — silently ignore failures
+    }
+}
+
+// Completion signal ("done") — descending two-tone chime
+function playBell() {
+    _withCtx(function (ctx) {
+        var t = ctx.currentTime;
+        _chime(ctx, 1318.51, t, 'sine');        // E6
+        _chime(ctx, 1046.50, t + 0.14, 'sine'); // C6
+    });
+}
+
+// Approval question ("needs your answer") — ascending, shorter two-tone
+function playAsk() {
+    _withCtx(function (ctx) {
+        var t = ctx.currentTime;
+        _chime(ctx, 1046.50, t, 'triangle', 0.3); // C6
+        _chime(ctx, 1318.51, t + 0.1, 'triangle', 0.3); // E6
+    });
+}
+
+function toggleBell() {
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('soundEnabled', soundEnabled);
+    var btn = document.getElementById('bellBtn');
+    if (btn) btn.classList.toggle('muted', !soundEnabled);
+}
+
 // ─── Chat SSE Streaming (FIXED: buffer for partial lines) ──────────────────
 async function sendChatMessage(rawText, attachments, typingEl) {
     var aiMsgEl = null;
@@ -789,6 +851,7 @@ async function sendChatMessage(rawText, attachments, typingEl) {
                         updateChatBubble(aiMsgEl, reasoningText, fullText, true);
                         scrollToBottom();
                     } else if (data.type === 'done') {
+                        playBell();
                         if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, data.fullText || fullText, false);
                         fullText = data.fullText || fullText;
                         pushAssistantMessage(fullText, aiMsgEl);
@@ -874,6 +937,7 @@ async function sendAgentMessage(text, typingEl) {
                         document.getElementById('messages').appendChild(card);
                         scrollToBottom();
                     } else if (data.type === 'approval_needed') {
+                        playAsk();
                         var card2 = toolCards.get(data.id);
                         if (card2) addApprovalButtons(card2, data.id);
                         scrollToBottom();
@@ -904,6 +968,7 @@ async function sendAgentMessage(text, typingEl) {
                         pushAssistantMessage(errMsg2, errEl2);
                         loadChatList();
                     } else if (data.type === 'done') {
+                        playBell();
                         if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
                         if (data.fullText) {
                             fullText = data.fullText;
@@ -2474,6 +2539,11 @@ document.addEventListener('click', function (e) {
         agentMode = true;
         document.getElementById('agentToggle').checked = true;
         document.getElementById('workdirBar').style.display = 'flex';
+    }
+    if (localStorage.getItem('soundEnabled') === 'false') {
+        soundEnabled = false;
+        var bellBtn = document.getElementById('bellBtn');
+        if (bellBtn) bellBtn.classList.add('muted');
     }
     updateInputToolbar();
     updateModeToggle();
