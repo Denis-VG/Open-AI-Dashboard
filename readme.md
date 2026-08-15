@@ -46,6 +46,7 @@ Required packages (see `requirements.txt`):
 - **Project instructions** — Setup tab: append project-specific rules to system prompt (stored in `.openAiDashboard/project_prompt.txt`)
 - **Inline reasoning cards** — agent thoughts appear right before each tool call, not stuck at the top; approval buttons always visible
 - **Agent status indicator** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec with elapsed timer
+- **Notification sounds** — 🔔 bell toggle next to the agent switch; distinct chimes for completion and approval requests (can be muted)
 - **Chat attachments** — attach files to a message (text attachments up to 200 KB each); stored separately so conversation history shows links, not inline content
 - **@-mentions** — type `@` in the agent input to autocomplete files and folders from the working directory; dot-directories (`.github`, `.vscode`) appear in suggestions, while dot-files (`.env`, `.gitignore`) and `.git` are always hidden
 - **Code-block copy & download** — one-click copy or save buttons on code blocks in assistant replies
@@ -126,6 +127,7 @@ pip install -r requirements.txt
 - **Инструкции проекта** — вкладка Setup: добавление правил проекта в system prompt (файл `.openAiDashboard/project_prompt.txt`)
 - **Inline-карточки рассуждений** — мысли агента перед каждым действием, а не вверху; кнопки подтверждения всегда видны
 - **Индикатор статуса агента** — 🟢 Ready / 🟡 Thinking · Reasoning · Exec с таймером
+- **Звуковые уведомления** — кнопка-колокольчик 🔔 рядом с переключателем агента; разные сигналы для завершения и запроса подтверждения (отключаются)
 - **Вложения в чат** — прикрепляйте файлы к сообщению (текстовые вложения до 200 КБ); хранятся отдельно, поэтому в истории чата показываются ссылки, а не инлайн-содержимое
 - **@-упоминания** — ввод `@` в поле агента подставляет файлы и папки рабочей директории (автодополнение); dot-папки (`.github`, `.vscode`) показываются, а dot-файлы (`.env`, `.gitignore`) и `.git` всегда скрыты
 - **Копирование и скачивание кода** — кнопки копирования/сохранения на блоках кода в ответах ассистента
