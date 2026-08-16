@@ -408,12 +408,12 @@ async function loadChatList() {
             var isAgent = c.chat_mode === 'agent';
             var title = escHtml(c.title);
             var modeBadge = isAgent
-                ? ' <span class="chat-mode-badge agent-badge" title="Agent mode">\uD83E\uDD16</span>'
-                : ' <span class="chat-mode-badge simple-badge" title="Simple chat">\uD83D\uDCAC</span>';
+                ? '<span class="chat-mode-badge agent-badge" title="Agent mode">\uD83E\uDD16</span>'
+                : '<span class="chat-mode-badge simple-badge" title="Simple chat">\uD83D\uDCAC</span>';
             var meta = c.messageCount + ' msgs \u00b7 ' + formatDateTime(c.updated);
             return '<div class="chat-item' + activeClass + '" data-action="openChat" data-id="' + c.id + '">'
                 + '<div style="min-width:0">'
-                + '<div class="chat-item-title">' + title + modeBadge + '</div>'
+                + '<div class="chat-item-title">' + modeBadge + title + '</div>'
                 + '<div class="chat-item-meta">' + meta + '</div>'
                 + '</div>'
                 + '<button class="chat-item-del" data-action="deleteChat" data-id="' + c.id + '" data-title="' + escHtml(c.title).replace(/"/g, '&quot;') + '">\u2715</button>'
