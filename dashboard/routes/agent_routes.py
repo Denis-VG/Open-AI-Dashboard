@@ -194,7 +194,6 @@ async def _chat(req: Request) -> StreamResponse:
     messages = data.get('messages', [])
     user_message = data.get('userMessage')
     attachments = data.get('attachments', [])
-    mode = data.get('mode', 'normal')
     cfg = read_config()
 
     resp = _sse_response()
@@ -209,8 +208,6 @@ async def _chat(req: Request) -> StreamResponse:
     tools: ToolRegistry = req.app['tool_registry']
     provider = create_provider(cfg['AI_PROVIDER'], tools)
 
-    from ..agent import get_system_prompt
-    sys_content = get_system_prompt(mode, tools._work_dir)
     history = [m for m in messages if m.get('role') != 'system']
     model_history = []
     for m in history:
@@ -219,7 +216,7 @@ async def _chat(req: Request) -> StreamResponse:
         mm.pop('attachments', None)
         model_history.append(mm)
     current_user = {'role': 'user', 'content': _inline_attachments({'content': user_message, 'attachments': attachments})}
-    all_messages = [{'role': 'system', 'content': sys_content}] + model_history + [current_user]
+    all_messages = model_history + [current_user]
 
     full_text = ''
     usage = {}
