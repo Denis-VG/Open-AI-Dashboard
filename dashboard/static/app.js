@@ -1128,6 +1128,16 @@ function expandReasoningBody(toolCard) {
     if (arrow) arrow.classList.add('open');
 }
 
+function collapseReasoningBody(toolCard) {
+    if (!toolCard) return;
+    var body = toolCard.closest('.reasoning-body');
+    if (!body) return;
+    body.classList.remove('open');
+    var card = body.closest('.reasoning-card');
+    var arrow = card ? card.querySelector('.reasoning-arrow') : null;
+    if (arrow) arrow.classList.remove('open');
+}
+
 // ─── Tool Cards ─────────────────────────────────────────────────────────────
 function createToolCard(data) {
     var icons = { write_file: '\ud83d\udcc4', read_file: '\ud83d\udcd6', list_directory: '\ud83d\udcc1', execute_command: '\u26a1', search_files: '\ud83d\udd0d' };
