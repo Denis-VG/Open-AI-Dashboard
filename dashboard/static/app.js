@@ -1194,9 +1194,11 @@ function updateToolCardResult(tc, data) {
     if (data.result && data.result.success) {
         status.className = 'tool-status success';
         status.textContent = 'Done';
+        collapseReasoningBody(tc);
     } else {
         status.className = 'tool-status rejected';
         status.textContent = 'Failed';
+        collapseReasoningBody(tc);
     }
     var resultText = '';
     if (data.name === 'write_file') {
@@ -1216,11 +1218,10 @@ function updateToolCardResult(tc, data) {
     }
     var resultEl = tc.querySelector('.tool-result');
     if (resultEl) resultEl.textContent = resultText || '(no output)';
-    // Keep the body and its reasoning card open so the result is visible
-    // (the body already starts open to show the request while running).
+    // The reasoning card is collapsed above once the tool finishes; keep the
+    // tool body open so the result is visible when the user re-expands it.
     var body = tc.querySelector('.tool-body');
     if (body) body.classList.add('open');
-    expandReasoningBody(tc);
 }
 
 function abortStream() {
