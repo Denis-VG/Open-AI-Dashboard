@@ -1231,6 +1231,12 @@ function abortStream() {
     setAgentStatus('ready');
 }
 
+function clearAgentOutput() {
+    // Re-render the persisted conversation to drop the DOM-only agent
+    // artifacts (reasoning cards and tool cards) from the current view.
+    renderMessages(chatMessages);
+}
+
 // ─── Agent Status Indicator ──────────────────────────────────────────────────
 var _statusTimer = null;
 var _statusStart = 0;
@@ -1546,6 +1552,8 @@ function updateModeToggle() {
     var label = document.getElementById('modeLabel');
     if (pills) pills.style.display = agentMode ? 'flex' : 'none';
     if (label) label.style.display = agentMode ? 'inline' : 'none';
+    var sweep = document.getElementById('sweepBtn');
+    if (sweep) sweep.style.display = agentMode ? 'inline-flex' : 'none';
 }
 
 function handleAttachFiles(fileList) {

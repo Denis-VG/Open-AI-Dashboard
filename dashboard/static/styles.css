@@ -740,8 +740,8 @@ body {
     transition: color 0.15s, background 0.15s;
 }
 .bell-btn svg {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     display: block;
 }
 .bell-btn:hover { color: var(--text); background: var(--surface2); }
