@@ -92,7 +92,7 @@ class AgentLoop:
     async def run(
         self,
         messages: list[dict],
-        mode: str,
+        mode_state: dict,
         on_event: EventSink,
     ) -> tuple[str, dict[str, int]]:
         """Execute the agent loop.
@@ -102,8 +102,9 @@ class AgentLoop:
         messages : list[dict]
             The *full* conversation so far (including the latest user message).
             Will be mutated in-place.
-        mode : str
-            'normal' or 'limitless'.
+        mode_state : dict
+            Mutable holder ``{'mode': 'normal' | 'limitless'}``. Read live so
+            the Normal/Limitless toggle can change behavior mid-run.
         on_event : callable
             Async callback receiving typed events (see code for event shapes).
 
@@ -112,7 +113,7 @@ class AgentLoop:
         tuple[str, dict] – (final_text, total_usage)
         """
         # Inject system prompt
-        self._inject_system(messages, mode)
+        self._inject_system(messages, mode_state.get('mode', 'normal'))
 
         final_text = ''
         total_usage: dict[str, int] = {}
@@ -138,7 +139,7 @@ class AgentLoop:
             # ── execute tool calls ───────────────────────────────────────────
             if ai_response.get('tool_calls'):
                 self._provider.append_assistant(messages, ai_response)
-                await self._execute_tools(ai_response['tool_calls'], messages, mode, on_event)
+                await self._execute_tools(ai_response['tool_calls'], messages, mode_state, on_event)
                 continue  # next iteration
 
             # ── no tool calls → final text (already streamed as delta) ────────
@@ -241,11 +242,12 @@ class AgentLoop:
         self,
         tool_calls: list[dict],
         messages: list[dict],
-        mode: str,
+        mode_state: dict,
         on_event: EventSink,
     ) -> None:
         """Execute each tool call, handling approvals."""
         for tc in tool_calls:
+            mode = mode_state.get('mode', 'normal')
             needs_approval = self._tools.needs_approval(tc['name']) and mode != 'limitless'
 
             await on_event({

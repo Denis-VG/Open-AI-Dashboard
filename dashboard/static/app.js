@@ -592,6 +592,14 @@ function setMode(mode) {
     currentMode = mode;
     document.getElementById('modeNormal').className = 'mode-pill' + (mode === 'normal' ? ' active-normal' : '');
     document.getElementById('modeLimitless').className = 'mode-pill' + (mode === 'limitless' ? ' active-limitless' : '');
+    // Push to a running agent so the switch applies immediately, not only on the next message.
+    if (isStreaming && agentMode) {
+        fetch(API + '/api/agent/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: mode })
+        }).catch(function (e) { console.error('agent mode update failed:', e); });
+    }
 }
 
 function resetMode() {

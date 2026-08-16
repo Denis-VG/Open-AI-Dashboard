@@ -143,6 +143,7 @@ async def _agent(req: Request) -> StreamResponse:
     messages = data.get('messages', [])
     user_message = data.get('userMessage')
     mode = data.get('mode', 'normal')
+    mode_state = {'mode': mode}
     cfg = read_config()
 
     resp = _sse_response()
@@ -163,12 +164,13 @@ async def _agent(req: Request) -> StreamResponse:
     all_messages = history + [{'role': 'user', 'content': user_message}]
 
     loop = AgentLoop(provider, tools, approval, tools._work_dir)
+    req.app['agent_mode'] = mode_state
     full_text = ''
     total_usage = {}
 
     async def work():
         nonlocal full_text, total_usage
-        full_text, total_usage = await loop.run(all_messages, mode, sse.send)
+        full_text, total_usage = await loop.run(all_messages, mode_state, sse.send)
 
     try:
         await _run_guarded(sse, work())
@@ -256,6 +258,17 @@ async def _agent_approve(req: Request) -> web.Response:
     return web.json_response({'success': found})
 
 
+async def _agent_mode(req: Request) -> web.Response:
+    data = await req.json()
+    mode = data.get('mode')
+    if mode not in ('normal', 'limitless'):
+        return web.json_response({'error': 'Invalid mode'}, status=400)
+    state = req.app.get('agent_mode')
+    if state is not None:
+        state['mode'] = mode
+    return web.json_response({'success': True, 'mode': mode})
+
+
 # ── workdir ──────────────────────────────────────────────────────────────────
 
 async def _workdir_get(req: Request) -> web.Response:
@@ -321,6 +334,7 @@ def register(app: web.Application) -> None:
     app.router.add_post('/api/agent', _agent)
     app.router.add_post('/api/chat', _chat)
     app.router.add_post('/api/agent/approve', _agent_approve)
+    app.router.add_post('/api/agent/mode', _agent_mode)
     app.router.add_get('/api/workdir', _workdir_get)
     app.router.add_post('/api/workdir', _workdir_post)
     app.router.add_get('/api/files', _files_get)
