@@ -133,15 +133,7 @@ class AgentLoop:
             # ── try to parse JSON tool-calls from text ───────────────────────
             self._extract_inline_tools(ai_response, on_event, iteration)
 
-            # Emit reasoning: DeepSeek-style reasoning_content, or model text
-            # alongside tool calls (both signal the model's thinking).
-            reasoning = ai_response.get('reasoning') or ''
-            if reasoning.strip() or (ai_response.get('content') and ai_response.get('tool_calls')):
-                await on_event({
-                    'type': 'agent_reasoning',
-                    'content': reasoning.strip() or ai_response.get('content', ''),
-                    'iteration': iteration + 1,
-                })
+            # reasoning/content are streamed live by provider.stream()
 
             # ── execute tool calls ───────────────────────────────────────────
             if ai_response.get('tool_calls'):
@@ -149,10 +141,8 @@ class AgentLoop:
                 await self._execute_tools(ai_response['tool_calls'], messages, mode, on_event)
                 continue  # next iteration
 
-            # ── no tool calls → final text ───────────────────────────────────
+            # ── no tool calls → final text (already streamed as delta) ────────
             final_text = ai_response.get('content', '')
-            if final_text:
-                await on_event({'type': 'agent_text', 'content': final_text})
             break
 
         await on_event({
@@ -183,7 +173,7 @@ class AgentLoop:
         no-tools mode.  Non-tool errors (auth, connectivity, bad model, …)
         are reported immediately without a pointless retry."""
         try:
-            return await self._provider.call(messages, read_config(), include_tools=True)
+            return await self._provider.stream(messages, read_config(), include_tools=True, on_event=on_event)
         except Exception as exc:
             err = str(exc) or type(exc).__name__ or 'Unknown error'
 
@@ -191,20 +181,20 @@ class AgentLoop:
             if iteration == 0 and self._looks_like_tool_error(err):
                 try:
                     await on_event({
-                        'type': 'agent_reasoning',
+                        'type': 'reasoning',
                         'content': 'Tool calling not supported by this model, falling back to chat mode...',
                         'iteration': 1,
                     })
-                    return await self._provider.call(messages, read_config(), include_tools=False)
+                    return await self._provider.stream(messages, read_config(), include_tools=False, on_event=on_event)
                 except Exception as exc2:
                     err2 = str(exc2) or 'Unknown error on fallback'
                     logger.error(f'Agent fallback error: {exc2}')
-                    await on_event({'type': 'agent_error', 'error': err2})
+                    await on_event({'type': 'error', 'content': err2})
                     return None
 
             # Either not first iteration, or error doesn't look tool-related
             logger.error(f'Agent error: {exc}')
-            await on_event({'type': 'agent_error', 'error': err})
+            await on_event({'type': 'error', 'content': err})
             return None
 
     def _extract_inline_tools(

@@ -150,7 +150,7 @@ async def _agent(req: Request) -> StreamResponse:
     sse = SSEWriter(resp)
 
     if not cfg.get('AI_PROVIDER'):
-        await sse.send({'type': 'agent_error', 'error': 'No AI provider configured. Please complete setup first.'})
+        await sse.send({'type': 'error', 'content': 'No AI provider configured. Please complete setup first.'})
         await sse.close()
         return resp
 
@@ -177,7 +177,7 @@ async def _agent(req: Request) -> StreamResponse:
         #    feedback loop where the model sees "⚠️ Agent Error: ..." as
         #    its own reply, and on next request the user message is repeated,
         #    creating an ever-growing error chain.
-        await sse.send({'type': 'agent_error', 'error': _friendly_error(e)})
+        await sse.send({'type': 'error', 'content': _friendly_error(e)})
 
     if chat_id:
         _save_assistant_reply(store, chat_id, user_message, full_text, messages, total_usage)
@@ -207,6 +207,7 @@ async def _chat(req: Request) -> StreamResponse:
         return resp
 
     tools: ToolRegistry = req.app['tool_registry']
+    provider = create_provider(cfg['AI_PROVIDER'], tools)
 
     from ..agent import get_system_prompt
     sys_content = get_system_prompt(mode, tools._work_dir)
@@ -227,7 +228,9 @@ async def _chat(req: Request) -> StreamResponse:
     async def work():
         nonlocal full_text, usage, error_occurred
         try:
-            full_text, usage = await _stream_chat(all_messages, cfg, sse)
+            result = await provider.stream(all_messages, cfg, include_tools=False, on_event=sse.send)
+            full_text = result.get('content', '')
+            usage = result.get('usage', {})
         except Exception as e:
             error_occurred = True
             await sse.send({'type': 'error', 'content': _friendly_error(e)})
@@ -243,176 +246,6 @@ async def _chat(req: Request) -> StreamResponse:
         _save_assistant_reply(store, chat_id, user_message, full_text if not error_occurred else '', messages, usage=usage, attachments=attachments)
 
     return resp
-
-
-# ── streaming helpers (chat route internals) ─────────────────────────────────
-
-async def _stream_chat(messages: list, cfg: dict, sse: SSEWriter) -> tuple[str, dict]:
-    """Stream a chat completion through SSE, returning (full_text, usage)."""
-    import re as _re
-    from aiohttp import ClientSession, ClientTimeout
-
-    provider = cfg.get('AI_PROVIDER')
-    model = cfg.get('OPENAI_MODEL') or cfg.get('AI_DISPLAY_MODEL')
-    base_url = cfg.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-    api_key = cfg.get('OPENAI_API_KEY') or cfg.get('GEMINI_API_KEY') or cfg.get('ANTHROPIC_API_KEY')
-
-    # ── OpenAI / Ollama ──
-    if provider in ('openai', 'ollama'):
-        payload = {'model': model, 'messages': messages, 'stream': True,
-                   'stream_options': {'include_usage': True}}
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {api_key}',
-        }
-        if 'openrouter' in cfg.get('OPENAI_BASE_URL', ''):
-            headers['HTTP-Referer'] = 'http://localhost:3000'
-            headers['X-Title'] = 'Portable AI Dashboard'
-
-        try:
-            full_text = ''
-            usage = {}
-            async with ClientSession() as session:
-                async with session.post(
-                    f'{base_url}/chat/completions', json=payload, headers=headers,
-                    timeout=ClientTimeout(total=None, connect=15, sock_read=60)
-                ) as resp:
-                    if resp.status != 200:
-                        error_body = await resp.text()
-                        raise Exception(f'API Error: status {resp.status}, body: {error_body[:1000]}')
-                    async for line in resp.content:
-                        line = line.decode('utf-8').strip()
-                        if not line.startswith('data: '):
-                            continue
-                        raw = line[6:].strip()
-                        if raw == '[DONE]':
-                            continue
-                        try:
-                            parsed = json.loads(raw)
-                            if parsed.get('usage'):
-                                usage = parsed['usage']
-                            delta_obj = parsed.get('choices', [{}])[0].get('delta', {})
-                            reasoning = delta_obj.get('reasoning_content') or delta_obj.get('reasoning') or ''
-                            if reasoning:
-                                await sse.send({'type': 'reasoning', 'content': reasoning})
-                            delta = delta_obj.get('content', '')
-                            if delta:
-                                full_text += delta
-                                await sse.send({'type': 'delta', 'content': delta})
-                        except Exception:
-                            pass
-            return full_text, usage
-        except Exception as exc:
-            log_api_error(provider, str(exc) or type(exc).__name__ or 'Unknown error', payload, None)
-            raise
-
-    # ── Anthropic ──
-    if provider == 'anthropic':
-        payload = {
-            'model': model or 'claude-3-5-sonnet-20241022',
-            'messages': messages,
-            'max_tokens': 4096,
-            'stream': True,
-        }
-        headers = {
-            'Content-Type': 'application/json',
-            'x-api-key': api_key,
-            'anthropic-version': '2023-06-01',
-        }
-
-        try:
-            full_text = ''
-            usage = {}
-            async with ClientSession() as session:
-                async with session.post(
-                    'https://api.anthropic.com/v1/messages', json=payload, headers=headers,
-                    timeout=ClientTimeout(total=None, connect=15, sock_read=60)
-                ) as resp:
-                    if resp.status != 200:
-                        error_body = await resp.text()
-                        raise Exception(f'Anthropic API Error: status {resp.status}, body: {error_body[:1000]}')
-                    async for line in resp.content:
-                        line = line.decode('utf-8').strip()
-                        if not line.startswith('data: '):
-                            continue
-                        try:
-                            parsed = json.loads(line[6:])
-                            ev_type = parsed.get('type')
-                            if ev_type == 'message_start':
-                                u = (parsed.get('message') or {}).get('usage') or {}
-                                usage['prompt_tokens'] = u.get('input_tokens', 0)
-                                usage['cache_read_input_tokens'] = u.get('cache_read_input_tokens', 0)
-                                usage['cache_creation_input_tokens'] = u.get('cache_creation_input_tokens', 0)
-                            elif ev_type == 'message_delta':
-                                u = parsed.get('usage') or {}
-                                if 'output_tokens' in u:
-                                    usage['completion_tokens'] = u['output_tokens']
-                            delta = parsed.get('delta', {}).get('text', '')
-                            if delta:
-                                full_text += delta
-                                await sse.send({'type': 'delta', 'content': delta})
-                        except Exception:
-                            pass
-            usage['total_tokens'] = usage.get('prompt_tokens', 0) + usage.get('completion_tokens', 0)
-            return full_text, usage
-        except Exception as exc:
-            log_api_error('anthropic', str(exc) or type(exc).__name__ or 'Unknown error', payload, None)
-            raise
-
-    # ── Gemini ──
-    if provider == 'gemini':
-        gem_model = model or 'gemini-2.0-pro-exp-02-05'
-        gem_messages = []
-        for m in messages:
-            role = 'model' if m.get('role') == 'assistant' else 'user'
-            gem_messages.append({'role': role, 'parts': [{'text': m.get('content', '')}]})
-        payload = {'contents': gem_messages}
-        safe_url = (
-            f'https://generativelanguage.googleapis.com/v1beta/models/{gem_model}:streamGenerateContent'
-            f'?key=***'
-        )
-        url = (
-            f'https://generativelanguage.googleapis.com/v1beta/models/{gem_model}:streamGenerateContent'
-            f'?key={api_key}'
-        )
-
-        try:
-            full_text = ''
-            raw_buffer = ''
-            usage = {}
-            async with ClientSession() as session:
-                async with session.post(url, json=payload, headers={'Content-Type': 'application/json'},
-                                        timeout=ClientTimeout(total=None, connect=15, sock_read=60)) as resp:
-                    if resp.status != 200:
-                        error_body = await resp.text()
-                        raise Exception(f'Gemini API Error: status {resp.status}, body: {error_body[:1000]}')
-                    async for chunk in resp.content:
-                        chunk = chunk.decode('utf-8')
-                        raw_buffer += chunk
-                        matches = _re.findall(r'"text":\s*"((?:[^"\\]|\\.)*)"', chunk)
-                        for m in matches:
-                            text = json.loads('{' + m + '}').get('text', '')
-                            if text:
-                                full_text += text
-                                await sse.send({'type': 'delta', 'content': text})
-
-            def _gem_num(name):
-                m = _re.search(r'"' + name + r'"\s*:\s*(\d+)', raw_buffer)
-                return int(m.group(1)) if m else 0
-
-            usage = {
-                'prompt_tokens': _gem_num('promptTokenCount'),
-                'completion_tokens': _gem_num('candidatesTokenCount'),
-                'total_tokens': _gem_num('totalTokenCount'),
-            }
-            return full_text, usage
-        except Exception as exc:
-            log_api_error('gemini', str(exc) or type(exc).__name__ or 'Unknown error',
-                          {'url': safe_url, 'payload': payload}, None)
-            raise
-
-    await sse.send({'type': 'error', 'content': 'Provider not configured or unsupported.'})
-    return '', {}
 
 
 # ── approval ─────────────────────────────────────────────────────────────────

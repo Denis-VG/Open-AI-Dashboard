@@ -866,7 +866,30 @@ function toggleBell() {
     if (btn) btn.classList.toggle('muted', !soundEnabled);
 }
 
-// ─── Chat SSE Streaming (FIXED: buffer for partial lines) ──────────────────
+// ─── Shared SSE reader (chat + agent) ────────────────────────────────────────
+async function readSseEvents(reader, onEvent, onError) {
+    var decoder = new TextDecoder();
+    var buffer = '';
+    while (true) {
+        var result = await reader.read();
+        if (result.done) break;
+        buffer += decoder.decode(result.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf('data: ') !== 0) continue;
+            try {
+                onEvent(JSON.parse(line.slice(6)));
+            } catch (e) {
+                if (onError) onError(e);
+                else console.error('SSE parse error:', e);
+            }
+        }
+    }
+}
+
+// ─── Chat SSE Streaming ──────────────────────────────────────────────────────
 async function sendChatMessage(rawText, attachments, typingEl) {
     var aiMsgEl = null;
     var fullText = '';
@@ -885,54 +908,37 @@ async function sendChatMessage(rawText, attachments, typingEl) {
             }),
             signal: streamController.signal,
         });
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
         typingEl.remove();
 
-        var buffer = '';
-        while (true) {
-            var result = await reader.read();
-            if (result.done) break;
-            buffer += decoder.decode(result.value, { stream: true });
-            var lines = buffer.split('\n');
-            buffer = lines.pop();
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i];
-                if (line.indexOf('data: ') !== 0) continue;
-                try {
-                    var data = JSON.parse(line.slice(6));
-                    if (data.type === 'reasoning') {
-                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
-                        reasoningText += data.content;
-                        updateChatBubble(aiMsgEl, reasoningText, fullText, true);
-                        scrollToBottom();
-                    } else if (data.type === 'delta') {
-                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
-                        fullText += data.content;
-                        updateChatBubble(aiMsgEl, reasoningText, fullText, true);
-                        scrollToBottom();
-                    } else if (data.type === 'done') {
-                        playBell();
-                        if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, data.fullText || fullText, false);
-                        fullText = data.fullText || fullText;
-                        pushAssistantMessage(fullText, aiMsgEl);
-                        if (data.usage) updateTokenDisplay(data.usage);
-                        loadChatList();
-                    } else if (data.type === 'error') {
-                        streamError = true;
-                        setAgentStatus('error');
-                        typingEl.remove();
-                        if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, fullText, false);
-                        var errMsg = '\u26a0\ufe0f Error: ' + (data.content || 'Unknown error');
-                        var errEl = appendMessage({ role: 'assistant', content: errMsg });
-                        pushAssistantMessage(errMsg, errEl);
-                        loadChatList();
-                    }
-                } catch (e) {
-                    console.error('SSE parse error (chat):', e);
-                }
+        await readSseEvents(res.body.getReader(), function (data) {
+            if (data.type === 'reasoning') {
+                if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
+                reasoningText += data.content;
+                updateChatBubble(aiMsgEl, reasoningText, fullText, true);
+                scrollToBottom();
+            } else if (data.type === 'delta') {
+                if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
+                fullText += data.content;
+                updateChatBubble(aiMsgEl, reasoningText, fullText, true);
+                scrollToBottom();
+            } else if (data.type === 'done') {
+                playBell();
+                if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, data.fullText || fullText, false);
+                fullText = data.fullText || fullText;
+                pushAssistantMessage(fullText, aiMsgEl);
+                if (data.usage) updateTokenDisplay(data.usage);
+                loadChatList();
+            } else if (data.type === 'error') {
+                streamError = true;
+                setAgentStatus('error');
+                typingEl.remove();
+                if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, fullText, false);
+                var errMsg = '\u26a0\ufe0f Error: ' + (data.content || 'Unknown error');
+                var errEl = appendMessage({ role: 'assistant', content: errMsg });
+                pushAssistantMessage(errMsg, errEl);
+                loadChatList();
             }
-        }
+        }, function (e) { console.error('SSE parse error (chat):', e); });
     } catch (err) {
         if (err.name === 'AbortError') {
             if (aiMsgEl) updateChatBubble(aiMsgEl, reasoningText, fullText || '*(stopped)*', false);
@@ -949,9 +955,8 @@ async function sendAgentMessage(text, typingEl) {
     var aiMsgEl = null;
     var fullText = '';
     var toolCards = new Map();
-    var toolEntries = new Map();
-    var lastReasoningEl = null;
     var currentStepCard = null;
+    var currentIteration = 0;
     try {
         streamController = new AbortController();
         var res = await fetch(API + '/api/agent', {
@@ -965,95 +970,73 @@ async function sendAgentMessage(text, typingEl) {
             }),
             signal: streamController.signal,
         });
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
         typingEl.remove();
-        var buffer = '';
-        while (true) {
-            var result = await reader.read();
-            if (result.done) break;
-            buffer += decoder.decode(result.value, { stream: true });
-            var lines = buffer.split('\n');
-            buffer = lines.pop();
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i];
-                if (line.indexOf('data: ') !== 0) continue;
-                try {
-                    var data = JSON.parse(line.slice(6));
-                    if (data.type === 'agent_thinking') {
-                        // Finalize previous reasoning card if any
-                        if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
-                        lastReasoningEl = null;
-                        currentStepCard = null;
-                    } else if (data.type === 'agent_reasoning') {
-                        setAgentStatus('reasoning');
-                        // Finalize previous, create new inline reasoning card
-                        if (lastReasoningEl) finalizeReasoningCard(lastReasoningEl);
-                        lastReasoningEl = createReasoningCard(data.iteration, data.content);
-                        currentStepCard = lastReasoningEl;
-                        document.getElementById('messages').appendChild(lastReasoningEl);
-                        scrollToBottom();
-                    } else if (data.type === 'tool_call') {
-                        setAgentStatus('exec');
-                        // Finalize reasoning card so tool appears right after it
-                        if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
-                        var card = createToolCard(data);
-                        toolCards.set(data.id, card);
-                        toolEntries.set(data.id, addRequestEntry(currentStepCard, data));
-                        document.getElementById('messages').appendChild(card);
-                        scrollToBottom();
-                    } else if (data.type === 'approval_needed') {
-                        playAsk();
-                        var card2 = toolCards.get(data.id);
-                        if (card2) addApprovalButtons(card2, data.id);
-                        scrollToBottom();
-                    } else if (data.type === 'tool_result') {
-                        var card3 = toolCards.get(data.id);
-                        if (card3) updateToolCardResult(card3, data);
-                        updateRequestEntry(toolEntries.get(data.id), !!(data.result && data.result.success));
-                        scrollToBottom();
-                    } else if (data.type === 'tool_rejected') {
-                        var card4 = toolCards.get(data.id);
-                        if (card4) {
-                            card4.querySelector('.tool-status').className = 'tool-status rejected';
-                            card4.querySelector('.tool-status').textContent = 'Rejected';
-                            var ab = card4.querySelector('.approval-bar');
-                            if (ab) ab.remove();
-                        }
-                        updateRequestEntry(toolEntries.get(data.id), false);
-                    } else if (data.type === 'agent_text') {
-                        if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
-                        currentStepCard = null;
-                        fullText = data.content;
-                        if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
-                        finalizeMessage(aiMsgEl, fullText);
-                        scrollToBottom();
-                    } else if (data.type === 'agent_error') {
-                        streamError = true;
-                        setAgentStatus('error');
-                        if (lastReasoningEl) { lastReasoningEl.remove(); lastReasoningEl = null; }
-                        var errMsg2 = '\u26a0\ufe0f Agent Error: ' + (data.error || 'Unknown error');
-                        var errEl2 = appendMessage({ role: 'assistant', content: errMsg2 });
-                        pushAssistantMessage(errMsg2, errEl2);
-                        loadChatList();
-                    } else if (data.type === 'done') {
-                        playBell();
-                        if (lastReasoningEl) { finalizeReasoningCard(lastReasoningEl); lastReasoningEl = null; }
-                        currentStepCard = null;
-                        if (data.fullText) {
-                            fullText = data.fullText;
-                            if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
-                            finalizeMessage(aiMsgEl, fullText);
-                            pushAssistantMessage(fullText, aiMsgEl);
-                        }
-                        if (data.usage) updateTokenDisplay(data.usage);
-                        loadChatList();
-                    }
-                } catch (e) {
-                    console.error('SSE parse error (agent):', e);
+
+        await readSseEvents(res.body.getReader(), function (data) {
+            if (data.type === 'agent_thinking') {
+                // New agent step starts — collapse the previous reasoning block.
+                currentIteration = data.iteration || currentIteration;
+                if (currentStepCard) finalizeReasoningCard(currentStepCard);
+                currentStepCard = null;
+            } else if (data.type === 'reasoning') {
+                setAgentStatus('reasoning');
+                if (!currentStepCard) {
+                    currentStepCard = createReasoningCard(data.iteration || currentIteration, data.content);
+                    document.getElementById('messages').appendChild(currentStepCard);
+                } else {
+                    appendReasoningText(currentStepCard, data.content);
                 }
+                scrollToBottom();
+            } else if (data.type === 'tool_call') {
+                setAgentStatus('exec');
+                var card = createToolCard(data);
+                toolCards.set(data.id, card);
+                attachToolCard(currentStepCard, card);
+                scrollToBottom();
+            } else if (data.type === 'approval_needed') {
+                playAsk();
+                var card2 = toolCards.get(data.id);
+                if (card2) addApprovalButtons(card2, data.id);
+                scrollToBottom();
+            } else if (data.type === 'tool_result') {
+                var card3 = toolCards.get(data.id);
+                if (card3) updateToolCardResult(card3, data);
+                scrollToBottom();
+            } else if (data.type === 'tool_rejected') {
+                var card4 = toolCards.get(data.id);
+                if (card4) {
+                    card4.querySelector('.tool-status').className = 'tool-status rejected';
+                    card4.querySelector('.tool-status').textContent = 'Rejected';
+                    var ab = card4.querySelector('.approval-bar');
+                    if (ab) ab.remove();
+                }
+            } else if (data.type === 'delta') {
+                if (currentStepCard) { finalizeReasoningCard(currentStepCard); currentStepCard = null; }
+                fullText += data.content;
+                if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, true);
+                updateStreamingMessage(aiMsgEl, fullText);
+                scrollToBottom();
+            } else if (data.type === 'error') {
+                streamError = true;
+                setAgentStatus('error');
+                if (currentStepCard) { finalizeReasoningCard(currentStepCard); currentStepCard = null; }
+                var errMsg2 = '\u26a0\ufe0f Agent Error: ' + (data.content || 'Unknown error');
+                var errEl2 = appendMessage({ role: 'assistant', content: errMsg2 });
+                pushAssistantMessage(errMsg2, errEl2);
+                loadChatList();
+            } else if (data.type === 'done') {
+                playBell();
+                if (currentStepCard) { finalizeReasoningCard(currentStepCard); currentStepCard = null; }
+                if (data.fullText) {
+                    fullText = data.fullText;
+                    if (!aiMsgEl) aiMsgEl = appendMessage({ role: 'assistant', content: '' }, undefined, false);
+                    finalizeMessage(aiMsgEl, fullText);
+                    pushAssistantMessage(fullText, aiMsgEl);
+                }
+                if (data.usage) updateTokenDisplay(data.usage);
+                loadChatList();
             }
-        }
+        }, function (e) { console.error('SSE parse error (agent):', e); });
     } catch (err) {
         if (err.name !== 'AbortError') {
             typingEl.remove();
@@ -1069,16 +1052,11 @@ function createReasoningCard(iteration, content) {
     el.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="reasoning-card open">'
         + '<div class="reasoning-header" onclick="var b=this.nextElementSibling;b.classList.toggle(\'open\');this.querySelector(\'.reasoning-arrow\').classList.toggle(\'open\')">'
         + '<span class="reasoning-pulse"></span>'
-        + '<span class="reasoning-label">Reasoning \u2014 Step ' + iteration + '</span>'
+        + '<span class="reasoning-label">\ud83d\udcad Reasoning \u2014 Step ' + iteration + '</span>'
         + '<span class="reasoning-arrow open">\u25bc</span>'
         + '</div>'
-        + '<div class="reasoning-body open">' + escHtml(content) + '</div>'
-        + '<div class="reasoning-footer" style="display:none">'
-        + '<div class="reasoning-footer-head" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.reasoning-footer-arrow\').classList.toggle(\'open\')">'
-        + '<span class="reasoning-footer-title">Requests</span>'
-        + '<span class="reasoning-footer-count">0</span>'
-        + '<span class="reasoning-footer-arrow">\u25be</span>'
-        + '</div>'
+        + '<div class="reasoning-body open">'
+        + '<div class="reasoning-text">' + escHtml(content) + '</div>'
         + '<div class="reasoning-requests"></div>'
         + '</div>'
         + '</div></div>';
@@ -1094,6 +1072,12 @@ function finalizeReasoningCard(el) {
     if (arrow) arrow.classList.remove('open');
 }
 
+function appendReasoningText(stepEl, text) {
+    if (!stepEl || !text) return;
+    var el = stepEl.querySelector('.reasoning-text');
+    if (el) el.textContent += text;
+}
+
 function toolPreview(name, args) {
     var p = name === 'write_file' || name === 'read_file' ? args.path
         : name === 'execute_command' ? args.command
@@ -1102,41 +1086,40 @@ function toolPreview(name, args) {
     return String(p || '').slice(0, 60);
 }
 
-// ─── Request entries (per-step footer list) ────────────────────────────────
-function addRequestEntry(stepEl, data) {
-    if (!stepEl) return null;
-    var footer = stepEl.querySelector('.reasoning-footer');
-    if (!footer) return null;
-    footer.style.display = '';
-    var list = footer.querySelector('.reasoning-requests');
-    var entry = document.createElement('div');
-    entry.className = 'request-entry running';
-    entry.innerHTML = '<span class="request-status"></span>'
-        + '<span class="request-label">' + escHtml(data.name + '(' + toolPreview(data.name, data.args) + ')') + '</span>';
-    list.appendChild(entry);
-    updateReasoningFooterCount(footer);
-    return entry;
+// ─── Tool cards nested inside the reasoning card's body ──────────────────────
+function attachToolCard(stepEl, toolCard) {
+    var container = stepEl ? stepEl.querySelector('.reasoning-requests') : null;
+    if (container) {
+        container.appendChild(toolCard);
+        return;
+    }
+    // No reasoning step to attach to (e.g. inline JSON tool calls) —
+    // render it as a standalone message block instead.
+    var wrapper = document.createElement('div');
+    wrapper.className = 'message';
+    wrapper.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"></div>';
+    wrapper.querySelector('.msg-body').appendChild(toolCard);
+    document.getElementById('messages').appendChild(wrapper);
 }
 
-function updateRequestEntry(entry, ok) {
-    if (!entry) return;
-    entry.className = 'request-entry ' + (ok ? 'success' : 'failed');
-}
-
-function updateReasoningFooterCount(footer) {
-    var count = footer.querySelector('.reasoning-footer-count');
-    var list = footer.querySelector('.reasoning-requests');
-    if (count) count.textContent = list ? list.children.length : 0;
+function expandReasoningBody(toolCard) {
+    if (!toolCard) return;
+    var body = toolCard.closest('.reasoning-body');
+    if (!body) return;
+    body.classList.add('open');
+    var card = body.closest('.reasoning-card');
+    var arrow = card ? card.querySelector('.reasoning-arrow') : null;
+    if (arrow) arrow.classList.add('open');
 }
 
 // ─── Tool Cards ─────────────────────────────────────────────────────────────
 function createToolCard(data) {
     var icons = { write_file: '\ud83d\udcc4', read_file: '\ud83d\udcd6', list_directory: '\ud83d\udcc1', execute_command: '\u26a1', search_files: '\ud83d\udd0d' };
-    var el = document.createElement('div');
-    el.className = 'message';
+    var tc = document.createElement('div');
+    tc.className = 'tool-card';
+    tc.id = 'tc_' + data.id;
     var preview = toolPreview(data.name, data.args);
-    el.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-body"><div class="tool-card" id="tc_' + data.id + '">'
-        + '<div class="tool-header" onclick="this.nextElementSibling.classList.toggle(\'open\')">'
+    tc.innerHTML = '<div class="tool-header" onclick="this.nextElementSibling.classList.toggle(\'open\')">'
         + '<span class="tool-icon">' + (icons[data.name] || '\ud83d\udd27') + '</span>'
         + '<span class="tool-name">' + data.name + '(' + escHtml(preview) + ')</span>'
         + '<span class="tool-status running">' + (data.needs_approval ? 'Pending' : 'Running') + '</span>'
@@ -1146,13 +1129,11 @@ function createToolCard(data) {
         + '<div class="tool-request">' + (data.name === 'write_file' ? escHtml(data.args.content || '').slice(0, 2000) : JSON.stringify(data.args, null, 2)) + '</div>'
         + '<div class="tool-section-label">Result</div>'
         + '<div class="tool-result"></div>'
-        + '</div>'
-        + '</div></div>';
-    return el;
+        + '</div>';
+    return tc;
 }
 
-function addApprovalButtons(card, callId) {
-    var tc = card.querySelector('.tool-card');
+function addApprovalButtons(tc, callId) {
     tc.querySelector('.tool-status').className = 'tool-status pending';
     tc.querySelector('.tool-status').textContent = 'Needs Approval';
     var bar = document.createElement('div');
@@ -1161,6 +1142,9 @@ function addApprovalButtons(card, callId) {
         + '<button class="approve-btn yes" data-action="approve" data-id="' + callId + '" data-approved="true">\u2713 Approve</button>'
         + '<button class="approve-btn no" data-action="approve" data-id="' + callId + '" data-approved="false">\u2717 Reject</button>';
     tc.appendChild(bar);
+    var body = tc.querySelector('.tool-body');
+    if (body) body.classList.add('open');
+    expandReasoningBody(tc);
 }
 
 async function approveToolCall(callId, approved, btn) {
@@ -1177,10 +1161,8 @@ async function approveToolCall(callId, approved, btn) {
     }
 }
 
-function updateToolCardResult(card, data) {
-    var tc = card.querySelector('.tool-card');
+function updateToolCardResult(tc, data) {
     var status = tc.querySelector('.tool-status');
-    var body = tc.querySelector('.tool-body');
     var ab = tc.querySelector('.approval-bar');
     if (ab) ab.remove();
     if (data.result && data.result.success) {
@@ -1208,7 +1190,6 @@ function updateToolCardResult(card, data) {
     }
     var resultEl = tc.querySelector('.tool-result');
     if (resultEl) resultEl.textContent = resultText || '(no output)';
-    body.classList.add('open');
 }
 
 function abortStream() {

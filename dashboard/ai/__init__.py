@@ -15,7 +15,7 @@ import logging
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -47,6 +47,77 @@ async def _safe_read_json(resp) -> dict:
         return {'_raw_body': raw, '_parse_error': True}
 
 
+async def _parse_openai_sse(line_iter, on_event) -> dict:
+    """Parse an OpenAI-compatible SSE stream.
+
+    Emits ``reasoning`` and ``delta`` events (when ``on_event`` is given) and
+    returns a normalised ``{content, reasoning, tool_calls, usage}`` dict.
+    """
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_acc: dict[int, dict] = {}
+    usage: dict = {}
+
+    async for raw_line in line_iter:
+        line = raw_line.decode('utf-8').strip()
+        if not line.startswith('data: '):
+            continue
+        data_str = line[6:].strip()
+        if data_str == '[DONE]':
+            continue
+        try:
+            parsed = json.loads(data_str)
+        except json.JSONDecodeError:
+            continue
+
+        if parsed.get('usage'):
+            usage = parsed['usage']
+        choices = parsed.get('choices') or []
+        if not choices:
+            continue
+        delta = choices[0].get('delta') or {}
+
+        reasoning = delta.get('reasoning_content') or delta.get('reasoning') or ''
+        if reasoning:
+            reasoning_parts.append(reasoning)
+            if on_event is not None:
+                await on_event({'type': 'reasoning', 'content': reasoning})
+
+        content = delta.get('content')
+        if content:
+            content_parts.append(content)
+            if on_event is not None:
+                await on_event({'type': 'delta', 'content': content})
+
+        for tcd in delta.get('tool_calls') or []:
+            idx = tcd.get('index', 0)
+            acc = tool_acc.setdefault(idx, {'id': '', 'name': '', 'args': []})
+            if tcd.get('id'):
+                acc['id'] = tcd['id']
+            fn = tcd.get('function') or {}
+            if fn.get('name'):
+                acc['name'] += fn['name']
+            if fn.get('arguments'):
+                acc['args'].append(fn['arguments'])
+
+    tool_calls = []
+    for idx in sorted(tool_acc):
+        acc = tool_acc[idx]
+        args_str = ''.join(acc['args'])
+        try:
+            args = json.loads(args_str) if args_str else {}
+        except json.JSONDecodeError:
+            args = {}
+        tool_calls.append({'id': acc['id'], 'name': acc['name'], 'args': args})
+
+    return {
+        'content': ''.join(content_parts),
+        'reasoning': ''.join(reasoning_parts),
+        'tool_calls': tool_calls,
+        'usage': usage,
+    }
+
+
 # ── abstract base ────────────────────────────────────────────────────────────
 
 class AIProvider(ABC):
@@ -62,6 +133,27 @@ class AIProvider(ABC):
            - tool_calls : list[dict] with keys id, name, args
         """
         ...
+
+    async def stream(
+        self,
+        messages: list[dict],
+        cfg: dict,
+        include_tools: bool = True,
+        on_event: Callable[[dict], Awaitable[None]] | None = None,
+    ) -> dict:
+        """Stream a completion, emitting ``reasoning``/``delta`` events and
+        returning the normalised response dict (with ``tool_calls``).
+
+        Default implementation falls back to non-streaming :meth:`call` and
+        emits the full reasoning/text as a single event each.
+        """
+        result = await self.call(messages, cfg, include_tools=include_tools)
+        if on_event is not None:
+            if result.get('reasoning'):
+                await on_event({'type': 'reasoning', 'content': result['reasoning']})
+            if result.get('content'):
+                await on_event({'type': 'delta', 'content': result['content']})
+        return result
 
     @abstractmethod
     def append_assistant(self, messages: list[dict], ai_response: dict) -> None:
@@ -150,6 +242,52 @@ class OpenAIProvider(AIProvider):
             err_msg = str(exc) or type(exc).__name__
             log_api_error('openai', err_msg, payload,
                           _try_get_response(exc, None))
+            raise
+
+    async def stream(
+        self,
+        messages: list[dict],
+        cfg: dict,
+        include_tools: bool = True,
+        on_event: Callable[[dict], Awaitable[None]] | None = None,
+    ) -> dict:
+        model = cfg.get('OPENAI_MODEL') or cfg.get('AI_DISPLAY_MODEL')
+        base_url = cfg.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+        api_key = cfg.get('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError('OPENAI_API_KEY missing')
+
+        payload: dict[str, Any] = {
+            'model': model,
+            'messages': messages,
+            'stream': True,
+            'stream_options': {'include_usage': True},
+        }
+        if include_tools:
+            payload['tools'] = self._tools.for_openai()
+
+        headers: dict[str, str] = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {api_key}',
+        }
+        if 'openrouter' in cfg.get('OPENAI_BASE_URL', ''):
+            headers['HTTP-Referer'] = 'http://localhost:3000'
+            headers['X-Title'] = 'Portable AI Agent'
+
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    f'{base_url}/chat/completions',
+                    json=payload, headers=headers,
+                    timeout=ClientTimeout(total=_API_TIMEOUT, connect=15, sock_read=120),
+                ) as resp:
+                    if resp.status != 200:
+                        error_body = await resp.text()
+                        raise Exception(f'API Error: status {resp.status}, body: {error_body[:1000]}')
+                    return await _parse_openai_sse(resp.content, on_event)
+        except Exception as exc:
+            err_msg = str(exc) or type(exc).__name__
+            log_api_error('openai', err_msg, payload, _try_get_response(exc, None))
             raise
 
     def append_assistant(self, messages: list[dict], ai_response: dict) -> None:
