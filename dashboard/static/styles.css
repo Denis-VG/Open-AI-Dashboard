@@ -1584,6 +1584,7 @@ select {
 .attach-btn {
     background: none;
     border: none;
+    transform: scaleX(1.4);
     cursor: pointer;
     font-size: 1.35rem;
     color: var(--text3);
