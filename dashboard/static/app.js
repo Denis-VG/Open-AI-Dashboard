@@ -1074,6 +1074,11 @@ function createReasoningCard(iteration, content) {
 function finalizeReasoningCard(el) {
     var pulse = el.querySelector('.reasoning-pulse');
     if (pulse) pulse.classList.add('done');
+    // Keep steps that ran tools expanded so their results stay visible;
+    // only collapse steps that are pure reasoning (verbose thinking that is
+    // no longer relevant once the step has finished).
+    var requests = el.querySelector('.reasoning-requests');
+    if (requests && requests.children.length > 0) return;
     var body = el.querySelector('.reasoning-body');
     var arrow = el.querySelector('.reasoning-arrow');
     if (body) body.classList.remove('open');
@@ -1083,7 +1088,10 @@ function finalizeReasoningCard(el) {
 function appendReasoningText(stepEl, text) {
     if (!stepEl || !text) return;
     var el = stepEl.querySelector('.reasoning-text');
-    if (el) el.textContent += text;
+    if (el) {
+        el.textContent += text;
+        el.scrollTop = el.scrollHeight;
+    }
 }
 
 function toolPreview(name, args) {
@@ -1132,7 +1140,7 @@ function createToolCard(data) {
         + '<span class="tool-name">' + data.name + '(' + escHtml(preview) + ')</span>'
         + '<span class="tool-status running">' + (data.needs_approval ? 'Pending' : 'Running') + '</span>'
         + '</div>'
-        + '<div class="tool-body">'
+        + '<div class="tool-body open">'
         + '<div class="tool-section-label">Request</div>'
         + '<div class="tool-request">' + (data.name === 'write_file' ? escHtml(data.args.content || '').slice(0, 2000) : JSON.stringify(data.args, null, 2)) + '</div>'
         + '<div class="tool-section-label">Result</div>'
@@ -1198,6 +1206,11 @@ function updateToolCardResult(tc, data) {
     }
     var resultEl = tc.querySelector('.tool-result');
     if (resultEl) resultEl.textContent = resultText || '(no output)';
+    // Keep the body and its reasoning card open so the result is visible
+    // (the body already starts open to show the request while running).
+    var body = tc.querySelector('.tool-body');
+    if (body) body.classList.add('open');
+    expandReasoningBody(tc);
 }
 
 function abortStream() {

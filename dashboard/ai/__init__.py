@@ -47,7 +47,7 @@ async def _safe_read_json(resp) -> dict:
         return {'_raw_body': raw, '_parse_error': True}
 
 
-async def _parse_openai_sse(line_iter, on_event) -> dict:
+async def _parse_openai_sse(line_iter, on_event, emit_delta: bool = True) -> dict:
     """Parse an OpenAI-compatible SSE stream.
 
     Emits ``reasoning`` and ``delta`` events (when ``on_event`` is given) and
@@ -86,7 +86,7 @@ async def _parse_openai_sse(line_iter, on_event) -> dict:
         content = delta.get('content')
         if content:
             content_parts.append(content)
-            if on_event is not None:
+            if on_event is not None and emit_delta:
                 await on_event({'type': 'delta', 'content': content})
 
         for tcd in delta.get('tool_calls') or []:
@@ -140,6 +140,7 @@ class AIProvider(ABC):
         cfg: dict,
         include_tools: bool = True,
         on_event: Callable[[dict], Awaitable[None]] | None = None,
+        emit_delta: bool = True,
     ) -> dict:
         """Stream a completion, emitting ``reasoning``/``delta`` events and
         returning the normalised response dict (with ``tool_calls``).
@@ -151,7 +152,7 @@ class AIProvider(ABC):
         if on_event is not None:
             if result.get('reasoning'):
                 await on_event({'type': 'reasoning', 'content': result['reasoning']})
-            if result.get('content'):
+            if result.get('content') and emit_delta:
                 await on_event({'type': 'delta', 'content': result['content']})
         return result
 
@@ -250,6 +251,7 @@ class OpenAIProvider(AIProvider):
         cfg: dict,
         include_tools: bool = True,
         on_event: Callable[[dict], Awaitable[None]] | None = None,
+        emit_delta: bool = True,
     ) -> dict:
         model = cfg.get('OPENAI_MODEL') or cfg.get('AI_DISPLAY_MODEL')
         base_url = cfg.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
@@ -284,7 +286,7 @@ class OpenAIProvider(AIProvider):
                     if resp.status != 200:
                         error_body = await resp.text()
                         raise Exception(f'API Error: status {resp.status}, body: {error_body[:1000]}')
-                    return await _parse_openai_sse(resp.content, on_event)
+                    return await _parse_openai_sse(resp.content, on_event, emit_delta)
         except Exception as exc:
             err_msg = str(exc) or type(exc).__name__
             log_api_error('openai', err_msg, payload, _try_get_response(exc, None))

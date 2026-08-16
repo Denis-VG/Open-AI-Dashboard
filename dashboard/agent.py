@@ -134,16 +134,22 @@ class AgentLoop:
             # ── try to parse JSON tool-calls from text ───────────────────────
             self._extract_inline_tools(ai_response, on_event, iteration)
 
-            # reasoning/content are streamed live by provider.stream()
+            # Content was buffered (not streamed) so we can route it correctly:
+            # text that arrives together with tool_calls is a preamble → reasoning.
+            content = ai_response.get('content', '') or ''
 
             # ── execute tool calls ───────────────────────────────────────────
             if ai_response.get('tool_calls'):
+                if content.strip():
+                    await on_event({'type': 'reasoning', 'content': content, 'iteration': iteration + 1})
                 self._provider.append_assistant(messages, ai_response)
                 await self._execute_tools(ai_response['tool_calls'], messages, mode_state, on_event)
                 continue  # next iteration
 
-            # ── no tool calls → final text (already streamed as delta) ────────
-            final_text = ai_response.get('content', '')
+            # ── no tool calls → final text ────────────────────────────────────
+            final_text = content
+            if final_text:
+                await on_event({'type': 'delta', 'content': final_text})
             break
 
         await on_event({
@@ -174,7 +180,7 @@ class AgentLoop:
         no-tools mode.  Non-tool errors (auth, connectivity, bad model, …)
         are reported immediately without a pointless retry."""
         try:
-            return await self._provider.stream(messages, read_config(), include_tools=True, on_event=on_event)
+            return await self._provider.stream(messages, read_config(), include_tools=True, on_event=on_event, emit_delta=False)
         except Exception as exc:
             err = str(exc) or type(exc).__name__ or 'Unknown error'
 
@@ -186,7 +192,7 @@ class AgentLoop:
                         'content': 'Tool calling not supported by this model, falling back to chat mode...',
                         'iteration': 1,
                     })
-                    return await self._provider.stream(messages, read_config(), include_tools=False, on_event=on_event)
+                    return await self._provider.stream(messages, read_config(), include_tools=False, on_event=on_event, emit_delta=False)
                 except Exception as exc2:
                     err2 = str(exc2) or 'Unknown error on fallback'
                     logger.error(f'Agent fallback error: {exc2}')
